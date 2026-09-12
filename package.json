@@ -2,12 +2,19 @@
   "name": "entropy-banco",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "backend/*"
+  ],
   "scripts": {
     "db:test": "node supabase/tests/assert.mjs",
     "db:metrics": "node supabase/tests/run.mjs supabase/tests/metrics.sql",
-    "db:push": "bash scripts/db-push.sh"
+    "db:push": "bash scripts/db-push.sh",
+    "agent:dev": "npm run dev --workspace=apps/agent",
+    "agent:build": "npm run build --workspace=apps/agent"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.0"
+    "@electric-sql/pglite": "^0.3.0",
+    "typescript": "^5"
   }
 }
