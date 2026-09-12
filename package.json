@@ -1,0 +1,13 @@
+{
+  "name": "entropy-banco",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:test": "node supabase/tests/assert.mjs",
+    "db:metrics": "node supabase/tests/run.mjs supabase/tests/metrics.sql",
+    "db:push": "bash scripts/db-push.sh"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0"
+  }
+}

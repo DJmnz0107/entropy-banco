@@ -47,7 +47,11 @@ language sql immutable as $$
   select case
     when j is null then null
     when jsonb_typeof(j) = 'boolean' then (j #>> '{}')::boolean
-    when jsonb_typeof(j) = 'string' then lower(j #>> '{}') in ('true','si','sí','yes','1')
+    -- tri-estado: "unknown" / "" = sin evidencia → NULL (ni true ni false)
+    when jsonb_typeof(j) = 'string' then case
+         when lower(j #>> '{}') in ('true','si','sí','yes','1') then true
+         when lower(j #>> '{}') in ('false','no','0') then false
+         else null end
     when jsonb_typeof(j) = 'number' then (j #>> '{}')::numeric <> 0
     else null end
 $$;

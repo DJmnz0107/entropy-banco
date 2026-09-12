@@ -6,12 +6,14 @@
 create table ai_model_profiles (
   id                   uuid primary key default gen_random_uuid(),
   key                  text unique not null,
+  -- voice_realtime = speech-to-speech en un solo modelo (ej. Gemini Live)
+  -- stt + composer + tts = pipeline en cascada (ej. Deepgram → Gemini Flash-Lite → Cartesia)
   role                 text not null check (role in
-                       ('voice_realtime','supervisor','composer','multimodal','summarizer','customer_simulator','judge')),
+                       ('voice_realtime','stt','tts','supervisor','composer','multimodal','summarizer','customer_simulator','judge')),
   provider             text not null,       -- google, openai, anthropic
   model_id             text not null,       -- ID exacto del API
   display_name         text not null,
-  modality             text not null check (modality in ('realtime_audio','text','multimodal')),
+  modality             text not null check (modality in ('realtime_audio','speech_to_text','text_to_speech','text','multimodal')),
   params               jsonb not null default '{}',   -- temperature, max_output_tokens, thinking, voice...
   vad_config           jsonb not null default '{}',   -- sensibilidad, padding, silencio, activity_handling
   interruption_config  jsonb not null default '{}',   -- override de agent_policies.interruption_policy
