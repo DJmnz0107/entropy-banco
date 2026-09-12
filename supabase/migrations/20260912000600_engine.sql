@@ -630,7 +630,7 @@ begin
                                risk_score, risk_band, matched_rules, block_reasons, offers, playbook_key,
                                channel_sequence, recommended_channel, reason, scheduled_for)
     values (cu.id, nullif(customer_facts(cu.id)->>'loan_id','')::uuid, (v_risk->>'id')::uuid, v_run, v_status,
-            (v_risk->>'score')::int, v_risk->>'band', v_risk->>'band',
+            (v_risk->>'score')::int, (v_risk->>'score')::int, v_risk->>'band',
             v_m->'matched_rules', v_m->'block_reasons',
             (select coalesce(jsonb_agg(jsonb_build_object('code', o->>'code', 'name', o->>'name')), '[]')
                from jsonb_array_elements(v_m->'offers') o),
