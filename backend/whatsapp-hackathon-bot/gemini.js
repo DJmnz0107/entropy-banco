@@ -1,24 +1,37 @@
 import { GoogleGenAI } from '@google/genai';
-import { knowledge } from './knowledge.js';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
-export async function askGemini(history, userMessage) {
-  const contents = [...history, { role: 'user', parts: [{ text: userMessage }] }];
+export function renderTemplate(template, vars) {
+  let out = template;
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.split(`{${key}}`).join(value ?? '');
+  }
+  return out;
+}
 
+// Llamada del "supervisor": evalúa el turno y devuelve el scorecard en JSON
+// validado contra el output_schema guardado en prompt_versions.
+export async function askScorecard(promptTemplate, vars, schema) {
+  const prompt = renderTemplate(promptTemplate, vars);
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: {
-      systemInstruction: knowledge,
+      responseMimeType: 'application/json',
+      responseSchema: schema,
     },
   });
+  return JSON.parse(response.text);
+}
 
-  const reply = response.text;
-
-  return {
-    reply,
-    history: [...contents, { role: 'model', parts: [{ text: reply }] }],
-  };
+// Llamada del "composer": redacta el mensaje que se le manda al cliente.
+export async function askComposer(promptTemplate, vars) {
+  const prompt = renderTemplate(promptTemplate, vars);
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+  });
+  return response.text.trim();
 }
