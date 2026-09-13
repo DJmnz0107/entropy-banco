@@ -57,6 +57,10 @@ export async function getState(conversationId: string): Promise<ConversationStat
     row.intervention_id ? db.interventionById(row.intervention_id) : Promise.resolve(null),
     row.commitment_id ? db.commitment(row.commitment_id) : Promise.resolve(null),
   ]);
+  // Si el estado se reconstruye a mitad de llamada (el mapa en memoria se perdió) y la etapa guardada
+  // ya es terminal (p. ej. CIERRE_TERCERO), la llamada debe cerrar de inmediato: nunca seguir negociando
+  // con un estado "recién iniciado". Antes esto quedaba fijo en false sin importar la etapa real.
+  const stageIsTerminal = context.playbook.stages.find((s) => s.key === row.current_stage)?.is_terminal ?? false;
 
   const state: ConversationState = {
     conversationId,
@@ -77,7 +81,7 @@ export async function getState(conversationId: string): Promise<ConversationStat
       receipt: commitment.receipt_code, code: commitment.offer_code, status: commitment.status,
       requiresApproval: commitment.requires_approval, generatesPaymentLink: false,
     } : null,
-    endCall: false,
+    endCall: stageIsTerminal || row.status !== 'active',
     outcome: null,
     lastAgentText: null,
     lastAgentMessageId: null,
