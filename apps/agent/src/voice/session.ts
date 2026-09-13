@@ -36,6 +36,41 @@ type BrowserMessage =
   | { type: 'error'; message: string }
   | { type: 'ready' };
 
+const CODE_MAP: Record<string, string> = {
+  FULL_PAYMENT: 'PAGO_TOTAL',
+  REMINDER: 'RECORDATORIO',
+  DATE_EXTENSION: 'EXTENSION_15',
+  PARTIAL_PAYMENT: 'PAGO_PARCIAL_50',
+  INSTALLMENT_PLAN: 'PLAN_3_CUOTAS',
+  FEE_WAIVER: 'CONDONACION_RECARGO',
+  CALLBACK: 'REAGENDAR',
+  HUMAN_ADVISOR: 'ASESOR_HUMANO',
+};
+
+function normalizeOfferCode(code: string): string {
+  if (!code) return 'PAGO_TOTAL';
+  const clean = code.trim().toUpperCase();
+  return CODE_MAP[clean] ?? clean;
+}
+
+function parseParams(val: unknown): Record<string, unknown> {
+  if (!val) return {};
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    return val as Record<string, unknown>;
+  }
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 export class VoiceSession {
   private customerId: string;
   private ws: WebSocket;
@@ -52,6 +87,7 @@ export class VoiceSession {
   private lastOfferParams: Record<string, unknown> = {};
 
   private supervisorRunning = false;
+  private commitmentOutcome: string | null = null;
   private ended = false;
 
   constructor(customerId: string, ws: WebSocket) {
@@ -71,8 +107,10 @@ export class VoiceSession {
         return;
       }
 
-      // 2. Start conversation in Supabase
-      this.startResult = await db.startConversation(this.customerId, 'voice', 'outbound');
+      // 2. Start conversation in Supabase (force=true so demo retries are never blocked)
+      this.startResult = await db.startConversation(this.customerId, 'voice', 'outbound', {
+        p_force: true,
+      });
       this.conversationId = this.startResult.conversation_id;
       this.currentStage = this.startResult.current_stage;
 
@@ -121,7 +159,7 @@ export class VoiceSession {
     if (msg.type === 'audio' && msg.data) {
       this.gemini?.sendAudio(msg.data);
     } else if (msg.type === 'end') {
-      void this.end('COMPLETED_AGENT', 'Cliente colgó la llamada.');
+      void this.end('FOLLOW_UP_REQUIRED', 'Cliente colgó la llamada.');
     }
   }
 
@@ -172,7 +210,7 @@ export class VoiceSession {
 
       case 'close':
         if (!this.ended) {
-          void this.end('COMPLETED_AGENT', 'Conexión con Gemini cerrada.');
+          void this.end('FOLLOW_UP_REQUIRED', 'Conexión con Gemini cerrada.');
         }
         break;
     }
@@ -194,10 +232,9 @@ export class VoiceSession {
 
       switch (call.name) {
         case 'validar_oferta': {
-          const offerCode = call.args['offer_code'] as string;
-          const params = call.args['params']
-            ? (JSON.parse(call.args['params'] as string) as Record<string, unknown>)
-            : {};
+          const rawCode = (call.args['offer_code'] as string) ?? '';
+          const offerCode = normalizeOfferCode(rawCode);
+          const params = parseParams(call.args['params']);
           const res = await db.validateOffer(this.conversationId, offerCode, params);
           this.lastOfferCode = offerCode;
           this.lastOfferParams = res.normalized_params ?? params;
@@ -207,16 +244,23 @@ export class VoiceSession {
               offer: { code: offerCode, terms_text: res.terms_text, instruction: res.instruction },
             });
           }
-          result = res;
+          result = {
+            valid: res.valid,
+            offer_code: offerCode,
+            terms_to_say: res.terms_text,
+            instruction: res.instruction,
+            errors: res.errors,
+          };
           break;
         }
 
         case 'registrar_compromiso': {
-          const offerCode = call.args['offer_code'] as string;
-          const params = call.args['params']
-            ? (JSON.parse(call.args['params'] as string) as Record<string, unknown>)
-            : this.lastOfferParams;
-          const confirmed = call.args['customer_confirmed'] === 'true';
+          const rawCode = (call.args['offer_code'] as string) ?? this.lastOfferCode ?? 'PAGO_TOTAL';
+          const offerCode = normalizeOfferCode(rawCode);
+          const parsedParams = parseParams(call.args['params']);
+          const params = Object.keys(parsedParams).length > 0 ? parsedParams : this.lastOfferParams;
+          const confArg = call.args['customer_confirmed'];
+          const confirmed = confArg === true || confArg === 'true' || confArg === 'yes';
           const res = await db.registerCommitment(
             this.conversationId,
             offerCode,
@@ -224,13 +268,30 @@ export class VoiceSession {
             confirmed,
           );
           if (res.ok && res.receipt_code) {
+            this.commitmentOutcome = res.requires_approval
+              ? 'PENDING_APPROVAL'
+              : offerCode === 'PLAN_3_CUOTAS' || offerCode === 'PLAN_6_CUOTAS'
+              ? 'PAYMENT_PLAN_AGREED'
+              : offerCode === 'EXTENSION_15' || offerCode === 'EXTENSION_POST_COSECHA'
+              ? 'DATE_EXTENSION_AGREED'
+              : offerCode === 'PAGO_PARCIAL_50'
+              ? 'PARTIAL_PAYMENT_AGREED'
+              : 'PAYMENT_COMMITMENT';
+
             this.sendBrowser({
               type: 'commitment',
               receipt_code: res.receipt_code,
               summary: res.summary,
             });
+            result = {
+              ok: true,
+              receipt_code: res.receipt_code,
+              instruction: `Di al cliente: "Excelente, su compromiso quedó registrado con el código ${res.receipt_code}". Luego pregunta si desea recibir el resumen por WhatsApp.`,
+              summary: res.summary,
+            };
+          } else {
+            result = res;
           }
-          result = res;
           break;
         }
 
@@ -373,13 +434,18 @@ export class VoiceSession {
     if (this.ended) return;
     this.ended = true;
 
-    console.log(`[session:${this.customerId}] Ending conversation — outcome: ${outcome}`);
+    const finalOutcome =
+      (outcome === 'FOLLOW_UP_REQUIRED' && this.commitmentOutcome)
+        ? this.commitmentOutcome
+        : outcome;
+
+    console.log(`[session:${this.customerId}] Ending conversation — outcome: ${finalOutcome}`);
 
     this.gemini?.close();
 
     if (this.conversationId) {
       try {
-        const result = await db.endConversation(this.conversationId, outcome, summary);
+        const result = await db.endConversation(this.conversationId, finalOutcome, summary);
         this.sendBrowser({
           type: 'end',
           outcome,

@@ -16,6 +16,10 @@ escalamiento; la base de datos rechaza lo que el modelo invente.
 Documentos:
 - `docs/PLAN.md` — plan, reparto por persona, voz/interrupciones, guion de demo, herramientas.
 - `docs/CONTRATO-API.md` — **contrato RPC** entre voz, WhatsApp y web. Leer antes de integrar.
+- `docs/WEB-CENTRO-PREVENCION.md` — paso a paso de la web (Centro de Prevención, en vivo, impacto, configuración).
+- `docs/AGENTE-VOZ-ELEVENLABS.md` — paso a paso del agente de voz con ElevenLabs.
+- 🆕 = objetos de la migración 1200 (Motor de Prevención) **aún no creada**: `next_best_intervention`, `run_prevention`,
+  `v_prevention_center`, `v_customer_financial_profile`, `intervention_steps`, `education_contents`, `v_impact`, `v_learning`.
 
 ## Decisiones vigentes
 
@@ -24,7 +28,9 @@ Documentos:
 | Fuente de verdad **y** lógica de negocio | **Supabase (Postgres)**: tablas + funciones RPC + vistas + Realtime |
 | Canales | Voz (Josué) · WhatsApp vía Twilio Sandbox (compañero) · Web Next.js (2 personas) |
 | LLM | **Gemini**, configurable por fila en `ai_model_profiles` (no hardcodear modelos) |
-| Voz por defecto | `gemini-3.1-flash-live-preview` (speech-to-speech). Comparar con 2.5 Native Audio y cascada |
+| Concepto | **Motor de Prevención / Next Best Intervention**: detectar → decidir la mejor intervención → contactar → adaptar → resolver → educar → seguir → medir → aprender. La voz es un brazo, no el producto |
+| Segmentación | Calificación preventiva **A–E** (= bandas de riesgo) + categoría regulatoria SSF A1–E (por días de atraso). Llamadas priorizadas a C–D; E → humano |
+| Voz | **ElevenLabs Agents + Custom LLM** (nuestro servidor responde `/v1/chat/completions` y ejecuta las tools contra Supabase). Plan B: LLM integrado + server tools. Gemini Live queda descartado |
 | Supervisor / WhatsApp | Gemini Flash-Lite (endpoint compatible OpenAI) |
 | Demo de voz | Navegador (WebRTC), **no** telefonía |
 | Datos | 100% ficticios, seed determinista, fechas relativas a hoy (America/El_Salvador) |

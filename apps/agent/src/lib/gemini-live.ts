@@ -16,7 +16,8 @@ import WebSocket from 'ws';
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) throw new Error('[gemini-live] Missing GEMINI_API_KEY');
 
-const LIVE_VOICE_MODEL = 'gemini-3.1-flash-live-preview';
+const LIVE_VOICE_MODEL =
+  process.env.GEMINI_LIVE_MODEL ?? 'gemini-2.5-flash-native-audio-latest';
 
 export type GeminiLiveTool = {
   functionDeclarations: Array<{

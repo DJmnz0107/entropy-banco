@@ -1,53 +1,105 @@
 /**
  * Supervisor LLM — generates scorecard for evaluate_turn.
  *
- * Uses Gemini Flash-Lite (text mode, temp=0) to classify each customer turn.
+ * Uses Gemini Flash (text mode, temp=0) to classify each customer turn.
+ * Fields match the 26 criteria defined in Postgres `evaluation_criteria`.
  * Runs in parallel with audio streaming — results are injected as [CONTROL] messages.
  */
 
 import 'dotenv/config';
 
 const API_KEY = process.env.GEMINI_API_KEY;
-const SUPERVISOR_MODEL = 'gemini-2.0-flash-lite'; // text-only supervisor
+const SUPERVISOR_MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
 
 export interface Scorecard {
-  intent: 'pay' | 'negotiate' | 'defer' | 'dispute' | 'escalate' | 'end' | 'unknown';
-  sentiment: 'positive' | 'neutral' | 'negative' | 'unknown';
+  intent:
+    | 'WILL_PAY'
+    | 'NEEDS_ALTERNATIVE_DATE'
+    | 'FINANCIAL_DIFFICULTY'
+    | 'ASKS_QUESTION'
+    | 'REFUSES'
+    | 'ANGRY'
+    | 'EVASIVE'
+    | 'REQUESTS_HUMAN'
+    | 'DISPUTE'
+    | 'POSSIBLE_FRAUD'
+    | 'ALREADY_PAID'
+    | 'CONFIRMS'
+    | 'WRONG_PERSON'
+    | 'UNKNOWN';
+  sentiment: 'POSITIVE' | 'NEUTRAL' | 'CONCERNED' | 'FRUSTRATED' | 'ANGRY';
   sentiment_score: number; // -1.0 to 1.0
-  engagement: 'high' | 'medium' | 'low' | 'unknown';
-  resistance: 'yes' | 'no' | 'unknown';
-  commitment_signal: 'yes' | 'no' | 'unknown';
-  confidence: number; // 0.0 to 1.0
-  identity_confirmed: 'yes' | 'no' | 'unknown';
+  engagement: number; // 0.0 to 1.0
+  resistance: number; // 0.0 to 1.0
+  comprehension: number; // 0.0 to 1.0
+  payment_capacity: 'full' | 'partial' | 'none' | 'unknown';
+  difficulty_reason:
+    | 'none'
+    | 'income_delay'
+    | 'job_loss'
+    | 'health'
+    | 'harvest'
+    | 'climate'
+    | 'unexpected_expense'
+    | 'remittance'
+    | 'other'
+    | 'unknown';
+  offer_interest: 'accepted' | 'interested' | 'neutral' | 'rejected' | 'unknown';
+  offer_code: string;
+  commitment_signal: 'none' | 'weak' | 'strong' | 'explicit';
+  extracted_date_text: string;
+  extracted_amount_text: string;
+  confirmation_given: 'yes' | 'no' | 'unknown';
   explicit_refusal: 'yes' | 'no' | 'unknown';
   do_not_contact_request: 'yes' | 'no' | 'unknown';
-  third_party_detected: 'yes' | 'no' | 'unknown';
-  callback_request: 'yes' | 'no' | 'unknown';
-  fraud_signal: 'yes' | 'no' | 'unknown';
-  frustration_signal: 'yes' | 'no' | 'unknown';
-  notes: string;
+  requests_human: 'yes' | 'no' | 'unknown';
+  dispute_or_fraud: 'yes' | 'no' | 'unknown';
+  accepts_whatsapp_followup: 'yes' | 'no' | 'unknown';
+  already_paid_claim: 'yes' | 'no' | 'unknown';
+  is_backchannel: 'yes' | 'no' | 'unknown';
+  identity_confirmed: 'yes' | 'no' | 'unknown';
+  wrong_person: 'yes' | 'no' | 'unknown';
+  confidence: number; // 0.0 to 1.0
+  evidence: string;
 }
 
 const SCORECARD_SCHEMA = `
-Responde SOLO con un JSON válido con esta estructura:
+Responde ÚNICAMENTE con un objeto JSON válido (sin markdown, sin explicaciones):
 {
-  "intent": "pay|negotiate|defer|dispute|escalate|end|unknown",
-  "sentiment": "positive|neutral|negative|unknown",
+  "intent": "WILL_PAY | NEEDS_ALTERNATIVE_DATE | FINANCIAL_DIFFICULTY | ASKS_QUESTION | REFUSES | ANGRY | EVASIVE | REQUESTS_HUMAN | DISPUTE | POSSIBLE_FRAUD | ALREADY_PAID | CONFIRMS | WRONG_PERSON | UNKNOWN",
+  "sentiment": "POSITIVE | NEUTRAL | CONCERNED | FRUSTRATED | ANGRY",
   "sentiment_score": <número entre -1.0 y 1.0>,
-  "engagement": "high|medium|low|unknown",
-  "resistance": "yes|no|unknown",
-  "commitment_signal": "yes|no|unknown",
+  "engagement": <número entre 0.0 y 1.0>,
+  "resistance": <número entre 0.0 y 1.0>,
+  "comprehension": <número entre 0.0 y 1.0>,
+  "payment_capacity": "full | partial | none | unknown",
+  "difficulty_reason": "none | income_delay | job_loss | health | harvest | climate | unexpected_expense | remittance | other | unknown",
+  "offer_interest": "accepted | interested | neutral | rejected | unknown",
+  "offer_code": "<código de la oferta que mencionó o aceptó, ej: PAGO_TOTAL, PLAN_3_CUOTAS, EXTENSION_15, o vacio \"\">",
+  "commitment_signal": "none | weak | strong | explicit",
+  "extracted_date_text": "<fecha literal mencionada por el cliente, ej: \"el viernes\", o vacio \"\">",
+  "extracted_amount_text": "<monto literal mencionado por el cliente, ej: \"50 dólares\", o vacio \"\">",
+  "confirmation_given": "yes | no | unknown",
+  "explicit_refusal": "yes | no | unknown",
+  "do_not_contact_request": "yes | no | unknown",
+  "requests_human": "yes | no | unknown",
+  "dispute_or_fraud": "yes | no | unknown",
+  "accepts_whatsapp_followup": "yes | no | unknown",
+  "already_paid_claim": "yes | no | unknown",
+  "is_backchannel": "yes | no | unknown",
+  "identity_confirmed": "yes | no | unknown",
+  "wrong_person": "yes | no | unknown",
   "confidence": <número entre 0.0 y 1.0>,
-  "identity_confirmed": "yes|no|unknown",
-  "explicit_refusal": "yes|no|unknown",
-  "do_not_contact_request": "yes|no|unknown",
-  "third_party_detected": "yes|no|unknown",
-  "callback_request": "yes|no|unknown",
-  "fraud_signal": "yes|no|unknown",
-  "frustration_signal": "yes|no|unknown",
-  "notes": "<breve observación>"
+  "evidence": "<frase textual corta del cliente que justifica la clasificación>"
 }
-Reglas: usa SOLO "yes"|"no"|"unknown" para los campos booleanos. "unknown" nunca equivale a "no".
+
+Reglas críticas:
+1. En confirmation_given, usa "yes" ÚNICAMENTE si el cliente dijo explícitamente "sí", "de acuerdo", "acepto" a una confirmación del agente. Un "ajá" o "mjm" es "unknown".
+2. Si el cliente dice "soy yo" o confirma su nombre en APERTURA -> identity_confirmed = "yes".
+3. Si el cliente dice "no está", "número equivocado" -> wrong_person = "yes", intent = "WRONG_PERSON".
+4. Si el cliente dice "ya pagué" -> already_paid_claim = "yes", intent = "ALREADY_PAID".
+5. Si el cliente pide no ser llamado -> do_not_contact_request = "yes".
+6. Si el cliente dice que no puede pagar todo -> payment_capacity = "partial" o "none", intent = "FINANCIAL_DIFFICULTY".
 `;
 
 export async function generateScorecard(
@@ -60,12 +112,13 @@ export async function generateScorecard(
     .map((m) => `${m.role === 'agent' ? 'Agente' : 'Cliente'}: ${m.text}`)
     .join('\n');
 
-  const prompt = `Eres el supervisor de una conversación de cobranza bancaria. Analiza el último mensaje del cliente y clasifícalo.
+  const prompt = `Eres el supervisor analista de conversaciones de cobranza bancaria de Bancoagrícola El Salvador.
+Evalúa con precisión el último turno del cliente.
 
 Etapa actual: ${stage}
 
 Historial reciente:
-${historySnippet}
+${historySnippet || '(inicio de la llamada)'}
 
 Último mensaje del cliente:
 "${customerText}"
@@ -80,7 +133,10 @@ ${SCORECARD_SCHEMA}`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+          },
         }),
       },
     );
@@ -98,23 +154,33 @@ ${SCORECARD_SCHEMA}`;
     return scorecard;
   } catch (err) {
     console.error('[supervisor] Error generating scorecard:', err);
-    // Return safe default so the conversation continues
+    // Safe default to keep conversation progressing
     return {
-      intent: 'unknown',
-      sentiment: 'unknown',
+      intent: 'UNKNOWN',
+      sentiment: 'NEUTRAL',
       sentiment_score: 0,
-      engagement: 'unknown',
-      resistance: 'unknown',
-      commitment_signal: 'unknown',
-      confidence: 0.5,
-      identity_confirmed: 'unknown',
+      engagement: 0.5,
+      resistance: 0,
+      comprehension: 0.8,
+      payment_capacity: 'unknown',
+      difficulty_reason: 'none',
+      offer_interest: 'unknown',
+      offer_code: '',
+      commitment_signal: 'none',
+      extracted_date_text: '',
+      extracted_amount_text: '',
+      confirmation_given: 'unknown',
       explicit_refusal: 'unknown',
       do_not_contact_request: 'unknown',
-      third_party_detected: 'unknown',
-      callback_request: 'unknown',
-      fraud_signal: 'unknown',
-      frustration_signal: 'unknown',
-      notes: 'Supervisor error — default scorecard used',
+      requests_human: 'unknown',
+      dispute_or_fraud: 'unknown',
+      accepts_whatsapp_followup: 'unknown',
+      already_paid_claim: 'unknown',
+      is_backchannel: 'no',
+      identity_confirmed: stage === 'APERTURA' ? 'unknown' : 'yes',
+      wrong_person: 'unknown',
+      confidence: 0.5,
+      evidence: 'Fallback scorecard',
     };
   }
 }

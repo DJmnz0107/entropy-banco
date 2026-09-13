@@ -30,12 +30,12 @@ export function setupVoiceWs(wss: WebSocketServer): void {
 
     ws.on('close', () => {
       console.log(`[ws] Connection closed for customer: ${customerId}`);
-      void session.end('COMPLETED_AGENT', 'WebSocket cerrado por el navegador.');
+      void session.end('FOLLOW_UP_REQUIRED', 'Llamada finalizada por el usuario.');
     });
 
     ws.on('error', (err) => {
       console.error(`[ws] Error for customer: ${customerId}`, err);
-      void session.end('ERROR', 'Error de WebSocket.');
+      void session.end('FAILED', 'Error de conexión WebSocket.');
     });
   });
 }

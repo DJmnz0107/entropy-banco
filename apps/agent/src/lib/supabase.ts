@@ -36,24 +36,39 @@ export interface ConversationContext {
     id: string;
     code: string;
     full_name: string;
+    first_name: string;
     contact_enabled: boolean;
+    segment?: string;
+    occupation?: string;
   };
   loan: {
+    id?: string;
+    product_name?: string;
+    product_type?: string;
     amount_due_text: string;
     next_due_date_text: string;
     days_to_due: number;
-    status: string;
+    days_past_due: number;
   };
   risk: {
     score: number;
     band: string;
-    factors: string[];
+    top_factors?: Array<{
+      key: string;
+      label: string;
+      detail: string;
+      points: number;
+      weight: number;
+    }>;
+    factors?: string[];
   };
   offers: Array<{
     code: string;
     name: string;
-    pitch: string;
-    type: string;
+    pitch?: string;
+    pitch_script?: string;
+    cta?: string;
+    requires_approval?: boolean;
   }>;
   max_offers_presented: number;
   playbook: {
@@ -63,18 +78,15 @@ export interface ConversationContext {
       key: string;
       name: string;
       objective: string;
-      instructions: string;
-      criteria: unknown[];
-      exit_rules: unknown;
-      allows_offers: boolean;
+      instructions?: string;
     }>;
   };
   policies: {
-    disclosure_script: string;
+    assistant_name?: string;
+    disclosure_text?: string;
+    disclosure_script?: string;
     prohibited_phrases: string[];
-    backchannel_phrases: string[];
-    critical_stages: string[];
-    silence_config: Record<string, unknown>;
+    interruption_policy?: Record<string, unknown>;
   };
   history: {
     previous_conversations: unknown[];
@@ -162,6 +174,7 @@ export interface RegisterCommitmentResult {
   receipt_code: string | null;
   commitment_id: string | null;
   status: string;
+  requires_approval?: boolean;
   summary: string;
   next_steps: string;
   instruction: string;
