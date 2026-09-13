@@ -13,7 +13,7 @@
     "agent:dev": "npm run dev --workspace=apps/agent",
     "agent:build": "npm run build --workspace=apps/agent",
     "bot:dev": "cd backend/whatsapp-hackathon-bot && PORT=3002 node --watch index.js",
-    "tunnel": "ngrok http 3000"
+    "tunnel": "ngrok http 3001"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0",
