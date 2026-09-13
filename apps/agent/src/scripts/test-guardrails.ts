@@ -2,7 +2,7 @@
  * Pruebas unitarias de guardrails (sin red, sin BD). docs/REGLAS-AGENTE-VOZ.md §5
  *   npx tsx apps/agent/src/scripts/test-guardrails.ts
  */
-import { OutputGuard, checkOutput, inspectCustomer } from '../voice/guardrails.js';
+import { OutputGuard, checkOutput, extractDates, inspectCustomer, unvalidatedDate } from '../voice/guardrails.js';
 
 let fails = 0;
 function expect(name: string, ok: boolean, detail = '') {
@@ -32,6 +32,19 @@ expect('URL bloqueada', checkOutput('Entre a www.bancoagricola.com para pagar.')
 for (const ok of ['Agradezco mucho su tiempo.', 'Permítame confirmar lo acordado: usted realizará el pago el lunes 21 de septiembre. ¿Es correcto?', 'Es un gusto, fue un agrado atenderle.', 'Comprendo, Luis. Sin embargo, la fecha máxima es el viernes.', 'Su cuota vence este lunes.']) {
   expect(`frase normal pasa: "${ok.slice(0, 40)}…"`, checkOutput(ok) === null);
 }
+
+// fechas (R-NEG-3)
+expect('extrae fecha en palabras', extractDates('el martes veintidós de septiembre').join() === '22-9');
+expect('extrae fecha en dígitos', extractDates('para el 30 de septiembre').join() === '30-9');
+const allowedDates = new Set(['17-9', '22-9']);
+expect('fecha validada pasa', unvalidatedDate('Su pago queda para el martes veintidós de septiembre.', allowedDates) === null);
+expect('fecha sin validar se detecta', unvalidatedDate('Podemos mover su cuota para el miércoles treinta de septiembre.', allowedDates) === '30-9');
+expect('fecha sin validar en negación pasa', unvalidatedDate('El treinta de septiembre excede el máximo permitido.', allowedDates) === null);
+let saidDate = '';
+const dateGuard = new OutputGuard((s) => { saidDate += s; }, () => '', () => allowedDates);
+for (const chunk of ['Entiendo, Ana. ', 'Podemos mover su cuota para el miércoles ', 'treinta de septiembre. ', '¿Le parece?']) dateGuard.push(chunk);
+dateGuard.flush();
+expect('stream: se detiene antes de decir la fecha', dateGuard.halted && saidDate === 'Entiendo, Ana. ', saidDate);
 
 // buffer por frase
 let spoken = '';

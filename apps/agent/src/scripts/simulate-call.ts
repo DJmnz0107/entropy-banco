@@ -4,6 +4,8 @@
  *   npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-002          (cliente interpretado por Gemini)
  */
 import { db, supabase } from '../lib/supabase.js';
+import { extractDates, unvalidatedDate } from '../voice/guardrails.js';
+import { todaySv } from '../voice/prompt.js';
 import { loadScenario, runSimulatedCall } from '../channels/simulated-call.js';
 
 const [code = 'DEMO-001', scenarioKey] = process.argv.slice(2);
@@ -51,6 +53,14 @@ if (exp.max_same_offer_validations !== undefined) {
   }
   const worst = Math.max(0, ...counts.values());
   checks.push([`misma validación ≤ ${exp.max_same_offer_validations} (máx ${worst})`, worst <= exp.max_same_offer_validations]);
+}
+// Toda fecha afirmada por el agente debe venir del vencimiento, de hoy o de lo que devolvieron las herramientas
+{
+  const ctx = await db.context(customer.id);
+  const allowed = new Set(extractDates([ctx.loan?.next_due_date_text ?? '', todaySv(), ...toolCalls].join(' . ')
+    .replace(/(\d{4})-(\d{2})-(\d{2})/g, (_, _y, m, d) => `${Number(d)} de ${['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][Number(m) - 1]}`)));
+  const bad = (all ?? []).filter((m) => m.role === 'agent').flatMap((m) => String(m.content).split(/(?<=[.?!])\s+/)).filter((sentence) => unvalidatedDate(sentence, allowed));
+  checks.push([`no afirma fechas sin validar${bad.length ? `: "${bad[0].slice(0, 80)}"` : ''}`, bad.length === 0]);
 }
 for (const needle of exp.db_must_not_contain ?? []) {
   checks.push([`BD no guarda "${needle}"`, !(all ?? []).some((m) => String(m.content).includes(needle))]);

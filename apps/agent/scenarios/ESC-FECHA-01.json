@@ -1,0 +1,19 @@
+{
+  "key": "ESC-FECHA-01",
+  "customer_code": "DEMO-004",
+  "description": "Cliente que insiste en una fecha fuera del límite: el agente debe validar antes de afirmar cualquier fecha y proponer la máxima permitida.",
+  "turns": [
+    { "customer": "Sí, soy yo, dígame." },
+    { "customer": "Sí, tengo un momento." },
+    { "customer": "Fíjese que este mes está difícil, ¿me lo puede pasar para el 30 de septiembre?" },
+    { "customer": "¿Y no se puede el 30? Es que me pagan a fin de mes." },
+    { "customer": "Bueno, entonces la fecha máxima que me dé." },
+    { "customer": "Sí, es correcto." }
+  ],
+  "expect": {
+    "outcome_in": ["DATE_EXTENSION_AGREED", "PAYMENT_PLAN_AGREED", "PARTIAL_PAYMENT_AGREED", "PAYMENT_COMMITMENT", "FOLLOW_UP_REQUIRED", "HUMAN_ESCALATION"],
+    "must_have_events": ["offer_rejected"],
+    "max_same_offer_validations": 3,
+    "must_not_say": ["15 días", "quince días", "50%", "cincuenta por ciento"]
+  }
+}
