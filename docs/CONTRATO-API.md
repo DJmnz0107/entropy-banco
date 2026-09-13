@@ -152,10 +152,13 @@ Devuelve `{ ok, receipt_code: "CMP-E3A899", commitment_id, status, summary, next
 
 ### `create_handoff(p_conversation_id, p_to_channel, p_action, p_payload = '{}')`
 `p_action`: `SEND_PAYMENT_LINK` (crea el link si no viene) · `SEND_COMMITMENT_SUMMARY` · `SEND_OFFER_DETAILS` · `FOLLOW_UP_MESSAGE` · `CALLBACK`.
-→ `{ handoff_id, payload: { payment_url, commitment: {…} }, context_summary }`
+Revalida política de contacto para WhatsApp (`contact_enabled`, `opted_out_at`, grupo de control, `consent_whatsapp`, teléfono, disputa abierta) y es **idempotente**: un segundo intento con el mismo `to_channel`+`action` en la misma conversación devuelve el handoff existente (`idempotent:true`), no crea otro.
+→ éxito: `{ ok:true, handoff_id, action, status:'pending', payload: { payment_url?, commitment: {…} }, context_summary }`
+→ rechazado por política/estado: `{ ok:false, error }` (`CONTACTO_NO_HABILITADO` · `CLIENTE_PIDIO_NO_SER_CONTACTADO` · `GRUPO_DE_CONTROL` · `SIN_CONSENTIMIENTO_PARA_CANAL` · `SIN_TELEFONO` · `DISPUTA_ABIERTA` · `SIN_COMPROMISO_REGISTRADO` · `COMPROMISO_PENDIENTE_DE_APROBACION` · `ACCION_DESCONOCIDA`) — nunca lanza excepción para estos casos, así el agente puede seguir la llamada.
+Nunca inicia el envío por sí solo (sin plantilla Meta aprobada no se puede escribir primero): el handoff queda `pending` hasta que el bot lo reclama cuando el cliente escribe (ver `docs/TAREA-CLAUDE-HANDOFF-VOZ-WHATSAPP.md`).
 
-### `claim_handoff(p_handoff_id)` / `complete_handoff(p_handoff_id, p_to_conversation_id, p_status)`
-Toma atómica: dos workers no procesan el mismo handoff.
+### `claim_handoff(p_handoff_id)` / `complete_handoff(p_handoff_id, p_to_conversation_id = null, p_status = 'completed', p_error = null)`
+Toma atómica: dos workers no procesan el mismo handoff. `complete_handoff` registra `handoff_completed` o `handoff_failed` (con `p_error`, sin secretos) en la conversación de origen.
 
 ### `request_escalation(p_conversation_id, p_reason, p_priority = 'high', p_trigger)`
 

@@ -76,8 +76,40 @@ export async function getRecentlyEndedConversation(customerId, channel, withinMi
   });
 }
 
-export async function startConversation(customerId, channel, direction = 'inbound') {
-  return rpc('start_conversation', { p_customer_id: customerId, p_channel: channel, p_direction: direction });
+export async function startConversation(customerId, channel, direction = 'inbound', parentConversationId = null) {
+  return rpc('start_conversation', {
+    p_customer_id: customerId, p_channel: channel, p_direction: direction,
+    p_parent_conversation_id: parentConversationId,
+  });
+}
+
+// Handoff de voz → WhatsApp (docs/TAREA-CLAUDE-HANDOFF-VOZ-WHATSAPP.md): el cliente escribe
+// "CONTINUAR" (o cualquier mensaje) y esto revisa si tiene un traspaso pendiente esperándolo.
+export async function getPendingWhatsAppHandoff(customerId) {
+  return withRetry(async () => {
+    const { data, error } = await supabase
+      .from('handoffs')
+      .select('id, from_conversation_id, to_channel, action, payload, context_summary, status, scheduled_for')
+      .eq('customer_id', customerId)
+      .eq('to_channel', 'whatsapp')
+      .eq('status', 'pending')
+      .lte('scheduled_for', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+}
+
+export async function claimHandoff(handoffId) {
+  return rpc('claim_handoff', { p_handoff_id: handoffId });
+}
+
+export async function completeHandoff(handoffId, toConversationId, status, error = null) {
+  return rpc('complete_handoff', {
+    p_handoff_id: handoffId, p_to_conversation_id: toConversationId, p_status: status, p_error: error,
+  });
 }
 
 export async function logMessage(conversationId, role, content, meta = {}) {

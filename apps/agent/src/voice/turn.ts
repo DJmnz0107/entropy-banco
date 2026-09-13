@@ -24,9 +24,9 @@ const CRITICAL = new Set(['PROPUESTA', 'COMPROMISO', 'CONFIRMACION']);
 // "Permítame un momento" hacía que el cliente siguiera hablando, ElevenLabs cancelaba y se repetían las condiciones.
 const SLOW_TOOLS = new Set(['registrar_compromiso']);
 const voiceDateGuard = process.env.DATE_GUARD !== 'false';
-const CLOSING_TOOLS = new Set(['finalizar_llamada', 'escalar_a_humano', 'agendar_rellamada', 'enviar_por_correo', 'registrar_desvio']);
+const CLOSING_TOOLS = new Set(['finalizar_llamada', 'escalar_a_humano', 'agendar_rellamada', 'enviar_por_correo', 'enviar_por_whatsapp', 'registrar_desvio']);
 const FAREWELL = 'Agradezco mucho su tiempo y disposición para conversar. Le deseo un excelente día.';
-export const PROMPT_VERSION = 'voice.system@code-2';
+export const PROMPT_VERSION = 'voice.system@code-3';
 
 function normalize(text: string): string {
   return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zñ ]/g, '').trim();

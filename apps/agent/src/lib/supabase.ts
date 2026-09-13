@@ -90,6 +90,10 @@ export const db = {
     rpc<CommitmentResult>('register_commitment', { p_conversation_id: conversationId, p_offer_code: code, p_params: params, p_customer_confirmed: confirmed }),
   createPaymentLink: (conversationId: string, amount?: number) =>
     rpc<{ token: string; url: string; amount: number; amount_text: string }>('create_payment_link', { p_conversation_id: conversationId, p_amount: amount ?? null }),
+  createHandoff: (conversationId: string, toChannel: string, action: string, payload: Json = {}) =>
+    rpc<{ ok: boolean; idempotent?: boolean; handoff_id?: string; action?: string; status?: string; payload?: Json; context_summary?: string; error?: string }>(
+      'create_handoff', { p_conversation_id: conversationId, p_to_channel: toChannel, p_action: action, p_payload: payload },
+    ),
   requestEscalation: (conversationId: string, reason: string) =>
     rpc<{ escalation_id: string }>('request_escalation', { p_conversation_id: conversationId, p_reason: reason, p_priority: 'high', p_trigger: 'AGENT_TOOL' }),
   endConversation: (conversationId: string, outcome: string, summary?: string | null, meta: Json = {}) =>

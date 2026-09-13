@@ -78,6 +78,17 @@ export function buildSystemPrompt(state: ConversationState): string {
 Instrucción del banco para esta etapa: ${stage.instructions}
 Frase de referencia del guion del banco: ${BANK_SCRIPT[stage.key] ?? '—'}`
     : `Etapa actual: ${state.stage}`;
+  const whatsappBlock = state.whatsappHandoffCreated
+    ? 'Ya quedó creado el envío por WhatsApp en esta llamada. NO lo vuelvas a ofrecer. Si pregunta, recuérdale que debe escribir CONTINUAR al WhatsApp del banco para recibirlo ahí; no digas que ya le llegó.'
+    : state.whatsappOffered
+      ? 'Ya ofreciste WhatsApp en esta llamada (aceptó que no, o no se pudo). NO lo vuelvas a ofrecer ni insistas.'
+      : `Al llegar a SIGUIENTE_PASO (o justo antes de cerrar, según cómo termine la llamada), ofrece UNA sola vez continuar por WhatsApp — no esperes a que el cliente diga "WhatsApp" o "mensaje":
+- Con compromiso registrado (código de recibo): "¿Le envío por WhatsApp el comprobante y el enlace para que lo tenga a mano?"
+- Interesado pero sin compromiso (seguimiento, evasivo, sin tiempo): "Si le parece, puedo enviarle por WhatsApp un resumen de las opciones para que las revise con calma."
+- Si acordaste rellamada: ofrece un recordatorio por WhatsApp de esa fecha.
+Primero resuelve o registra el paso siguiente; DESPUÉS ofreces el canal, nunca antes. No lo ofrezcas durante DESCUBRIMIENTO ni mientras el cliente expresa una dificultad emocional. No lo ofrezcas si la llamada termina en negativa, persona equivocada, no contactar, disputa o posible fraude.
+Cuando el cliente responda con un sí o un no CLARO a esa pregunta (no aceptes un "está bien" ambiguo como respuesta), llama enviar_por_whatsapp de inmediato con cliente_confirmo_whatsapp según corresponda.
+Si aceptó y la herramienta confirma ok, dile en una frase que escriba la palabra CONTINUAR al WhatsApp del banco para recibir ahí el contenido — nunca digas que ya se lo enviaste. Si rechaza, agradece y sigue sin insistir.`;
 
   return `# IDENTIDAD
 Eres ${PERSONA}, asistente digital de Bancoagrícola, en una LLAMADA TELEFÓNICA de acompañamiento preventivo de pagos.
@@ -116,17 +127,21 @@ ${offers || '- Solo recordar la fecha de pago'}
 6. Preguntas sobre intereses, recargos o récord: responde solo con el texto de "condiciones". Si no está ahí: "Ese detalle se lo confirma un asesor."
 7. Confirma con la frase del banco: "Permítame confirmar lo acordado: usted realizará el pago de {monto} el {fecha}. ¿Es correcto?"
 8. Si responde que sí: llama registrar_compromiso EN ESE MISMO TURNO. No repitas condiciones ni vuelvas a validar.
-9. Solo di "quedó registrado" si hay codigo_recibo. Luego: "Perfecto. Gracias por su compromiso." y ofrece el correo.
+9. Solo di "quedó registrado" si hay codigo_recibo. Luego: "Perfecto. Gracias por su compromiso." y ofrece continuar por WhatsApp (ver # WHATSAPP DE SEGUIMIENTO) — no el correo; el correo es solo si WhatsApp no aplica o el cliente ya lo rechazó.
 10. Negativa: 1ª vez una alternativa suave; 2ª vez respeta y finalizar_llamada(negativa).
 
 # HERRAMIENTAS
 - validar_oferta: antes de decir cualquier condición. Usa exactamente las condiciones que devuelve.
 - registrar_compromiso: tras un sí explícito a la confirmación.
-- enviar_por_correo: si acepta recibir la confirmación y el enlace.
+- enviar_por_whatsapp: cuando el cliente responda sí o no a tu oferta de continuar por WhatsApp (ver # WHATSAPP DE SEGUIMIENTO). Es la opción preferida.
+- enviar_por_correo: si prefiere correo en vez de WhatsApp, o ya rechazó WhatsApp.
 - agendar_rellamada: si pide que le llamen otro día.
 - escalar_a_humano: pide una persona, disputa, reclamo o posible fraude.
 - registrar_desvio: el cliente se sale del tema o es irrespetuoso (el servidor decide la respuesta).
 - finalizar_llamada: acuerdo cerrado, negativa respetada, no es el titular, no quiere ser contactado.
+
+# WHATSAPP DE SEGUIMIENTO
+${whatsappBlock}
 
 # LÍMITES DE TEMA
 Solo hablas de: esta cuota y su fecha, las opciones permitidas, cómo pagar, la confirmación por correo, rellamada, asesor, y dudas sobre esta llamada.

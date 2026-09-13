@@ -80,8 +80,23 @@ export function toolDefinitions(state: ConversationState): ChatCompletionTool[] 
       type: 'function',
       function: {
         name: 'enviar_por_correo',
-        description: 'Envía por correo la confirmación del compromiso con el link de pago y un video breve. Úsalo cuando el cliente acepte.',
+        description: 'Envía por correo la confirmación del compromiso con el link de pago y un video breve. Úsalo si el cliente prefiere correo en vez de WhatsApp, o ya rechazó WhatsApp.',
         parameters: { type: 'object', properties: {} },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'enviar_por_whatsapp',
+        description: 'Ofrece continuar por WhatsApp (comprobante, opciones o rellamada). Llámala DESPUÉS de que el cliente responda claramente sí o no a tu pregunta de WhatsApp; nunca antes.',
+        parameters: {
+          type: 'object',
+          properties: {
+            accion: { type: 'string', enum: ['SEND_PAYMENT_LINK', 'SEND_COMMITMENT_SUMMARY', 'SEND_OFFER_DETAILS', 'FOLLOW_UP_MESSAGE', 'CALLBACK'], description: 'Tu mejor estimación; el servidor la corrige si no coincide con el estado real.' },
+            cliente_confirmo_whatsapp: { type: 'boolean', description: 'true SOLO si respondió que sí claramente. false si dijo que no o fue ambiguo.' },
+          },
+          required: ['accion', 'cliente_confirmo_whatsapp'],
+        },
       },
     },
     {
@@ -252,6 +267,28 @@ export async function executeTool(state: ConversationState, name: string, args: 
       if (!state.commitment) return { ok: false, error: 'Aún no hay compromiso registrado.' };
       void sendConfirmationEmail(state);
       return { ok: true, instruccion: 'Dile que en unos minutos le llega el correo con la confirmación y el link.' };
+    }
+    case 'enviar_por_whatsapp': {
+      state.whatsappOffered = true;
+      if (args.cliente_confirmo_whatsapp !== true) {
+        void db.logEvent(conv, 'whatsapp_handoff_declined', { by: 'customer', accion_pedida: String(args.accion ?? '') });
+        return { ok: true, instruccion: 'Agradece y sigue con el cierre normal, sin insistir con WhatsApp.' };
+      }
+      // El modelo propone la acción; el estado real de la llamada manda (nunca se confía ciegamente en el argumento).
+      const accion = state.commitment
+        ? (state.commitment.requiresApproval ? 'SEND_COMMITMENT_SUMMARY' : 'SEND_PAYMENT_LINK')
+        : state.outcome === 'CALLBACK_SCHEDULED'
+          ? 'CALLBACK'
+          : (args.accion === 'SEND_OFFER_DETAILS' ? 'SEND_OFFER_DETAILS' : 'FOLLOW_UP_MESSAGE');
+      const payload: Json = accion === 'CALLBACK' ? { date: state.allowedDateTexts.at(-1) ?? null } : {};
+      const res = await db.createHandoff(conv, 'whatsapp', accion, payload);
+      if (!res.ok) {
+        return { ok: false, error: res.error,
+                 instruccion: 'No se puede enviar por WhatsApp ahora mismo. No digas que se lo vas a enviar; si aplica, ofrece el correo en su lugar y continúa.' };
+      }
+      state.whatsappHandoffCreated = true;
+      return { ok: true, accion,
+               instruccion: 'Dile que escriba la palabra CONTINUAR al WhatsApp del banco para recibir ahí el comprobante/resumen. No digas que ya se lo enviaste ni que ya le llegó.' };
     }
     case 'agendar_rellamada': {
       const code = state.context.offers.find((o) => o.offer_type === 'CALLBACK')?.code ?? 'REAGENDAR';

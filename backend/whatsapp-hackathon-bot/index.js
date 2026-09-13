@@ -3,6 +3,21 @@ import './env.js';
 import express from 'express';
 import { sendWhatsAppMessage, sendWhatsAppList, sendWhatsAppButtons } from './whatsapp.js';
 import { handleIncomingMessage } from './engine.js';
+import { findCustomerByPhone } from './supabase.js';
+import { tryConsumePendingHandoff } from './handoffs.js';
+
+// Handoff de voz → WhatsApp: antes de correr el chatbot normal, se revisa si
+// este cliente tiene un traspaso pendiente esperando que escriba. Si lo hay,
+// se atiende ESO y no se entra al flujo conversacional habitual en ese turno.
+// Devuelve null si no había nada pendiente (o el teléfono no es de un cliente demo).
+async function tryHandoffFirst(from, text) {
+  const customer = await findCustomerByPhone(from).catch(() => null);
+  if (!customer?.customer_id) return null;
+  return tryConsumePendingHandoff(customer.customer_id, from, text).catch((err) => {
+    console.error('Error consumiendo handoff pendiente (se sigue con el chatbot normal):', err?.message ?? err);
+    return null;
+  });
+}
 
 // Extrae el texto "hablado" por el cliente sin importar si escribió
 // texto libre o tocó una opción de una lista/botón interactivo.
@@ -73,7 +88,12 @@ app.post('/webhook', async (req, res) => {
 
     let result;
     try {
-      result = await handleIncomingMessage(from, text);
+      result = await tryHandoffFirst(from, text);
+      if (result) {
+        console.log(`Handoff pendiente atendido para ${from}.`);
+      } else {
+        result = await handleIncomingMessage(from, text);
+      }
     } catch (err) {
       console.error('Error procesando mensaje de WhatsApp (con reintentos ya agotados):', err?.message ?? err);
       // El cliente nunca se queda sin respuesta, aunque el motor/Gemini haya fallado del todo.
@@ -101,7 +121,7 @@ app.post('/test-chat', async (req, res) => {
     const { from, message } = req.body;
     if (!from || !message) return res.status(400).json({ error: 'Faltan "from" (teléfono) y/o "message" en el body' });
 
-    const result = await handleIncomingMessage(from, message);
+    const result = (await tryHandoffFirst(from, message)) ?? (await handleIncomingMessage(from, message));
     if (!result) return res.status(404).json({ error: 'Ese teléfono no corresponde a ningún cliente de la demo' });
 
     res.json({ reply: result.text, list: result.list, buttons: result.buttons });

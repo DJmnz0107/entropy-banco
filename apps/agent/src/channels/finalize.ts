@@ -58,7 +58,7 @@ export async function finalizeConversation(conversationId: string, opts: {
 
   if (state) {
     const policy = await db.activePolicy().catch(() => null);
-    if (state.commitment) {
+    if (state.commitment && !state.whatsappHandoffCreated) {
       await sendConfirmationEmail(state);
     } else if (!opts.answered && !opts.manual && (policy?.email_fallback ?? true)) {
       const item = await fallbackItemFromState(state);

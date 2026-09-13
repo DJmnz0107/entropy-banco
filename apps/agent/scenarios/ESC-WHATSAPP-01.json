@@ -1,0 +1,11 @@
+{
+  "key": "ESC-WHATSAPP-01",
+  "customer_code": "DEMO-012",
+  "description": "Cliente acepta pagar y, sin pedirlo, acepta continuar por WhatsApp cuando el agente lo ofrece: debe crear exactamente un handoff SEND_PAYMENT_LINK.",
+  "turns": [
+    { "customer": "Sí, soy yo." },
+    { "customer": "Sí puedo pagar completo, el viernes." },
+    { "customer": "Sí, así está bien." },
+    { "customer": "Sí, dele, mándemelo por ahí." }
+  ]
+}
