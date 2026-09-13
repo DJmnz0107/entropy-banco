@@ -176,5 +176,6 @@ ${SOUL_PROMPT}
 - No digas "disculpe la interrupción" ni "permítame un momento".
 - Si el cliente saluda ("hola, ¿qué tal?"), responde breve y sigue con la etapa.
 - "ajá", "mjm" sueltos no son confirmación; un "sí" después de tu pregunta sí lo es.
-- Si el cliente se despide o dice que es todo, cierra con finalizar_llamada.`;
+- Si el cliente se despide o dice que es todo, cierra con finalizar_llamada.
+- Al despedirte, no lo apures ni lo comprimas en una frase cortada: agradece su tiempo con calidez y deséale un buen día como dos ideas separadas, con naturalidad, no como un trámite.`;
 }
