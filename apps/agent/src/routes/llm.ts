@@ -76,6 +76,18 @@ async function handleCompletion(c: Context) {
         return;
       }
       const state = await getState(conversationId);
+      // Colgada desde la web: despedida corta y end_call, sin registrar más turnos
+      if (state.hangupRequested) {
+        await stream.writeSSE({ data: chunk({ role: 'assistant', content: 'Le agradezco su tiempo. Que tenga un buen día.' }) });
+        if (canEndCall) {
+          await stream.writeSSE({ data: chunk({ tool_calls: [{ index: 0, id: `call_${randomUUID()}`, type: 'function', function: { name: 'end_call', arguments: JSON.stringify({ reason: 'hangup_from_dashboard' }) } }] }) });
+          await stream.writeSSE({ data: chunk({}, 'tool_calls') });
+        } else {
+          await stream.writeSSE({ data: chunk({}, 'stop') });
+        }
+        await stream.writeSSE({ data: '[DONE]' });
+        return;
+      }
       // Si el cliente sigue hablando, ElevenLabs cancela este request y manda otro: el viejo deja de hablar y de registrar
       const seq = ++state.requestSeq;
       const isStale = () => aborted || c.req.raw.signal.aborted || state.requestSeq !== seq;

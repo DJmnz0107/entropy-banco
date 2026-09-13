@@ -31,6 +31,8 @@ export async function finalizeConversation(conversationId: string, opts: {
   summary?: string | null;
   failureReason?: string | null;
   realCall: boolean;
+  /** Cerrada a mano desde la web: no se manda correo de "intentamos comunicarnos". */
+  manual?: boolean;
 }): Promise<{ outcome: string; alreadyClosed: boolean }> {
   const row = await db.conversationRow(conversationId);
   if (!row) throw new Error(`CONVERSACION_NO_EXISTE: ${conversationId}`);
@@ -58,7 +60,7 @@ export async function finalizeConversation(conversationId: string, opts: {
     const policy = await db.activePolicy().catch(() => null);
     if (state.commitment) {
       await sendConfirmationEmail(state);
-    } else if (!opts.answered && (policy?.email_fallback ?? true)) {
+    } else if (!opts.answered && !opts.manual && (policy?.email_fallback ?? true)) {
       const item = await fallbackItemFromState(state);
       if (item) await sendRunEmail(item, 'fallback');
     }

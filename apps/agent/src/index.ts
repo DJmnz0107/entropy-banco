@@ -22,6 +22,8 @@ app.get('/', (c) => c.json({
     run: 'POST /runs  (x-agent-secret)',
     dispatch: 'POST /runs/:runId/dispatch  (x-agent-secret)',
     call: 'POST /calls/:customerId  (x-agent-secret)',
+    hangup: 'POST /calls/:conversationId/hangup  (x-agent-secret)',
+    email: 'POST /emails/:customerId  (x-agent-secret)',
     custom_llm: 'POST /v1/chat/completions  (ElevenLabs Custom LLM)',
     webhook: 'POST /webhooks/elevenlabs',
   },

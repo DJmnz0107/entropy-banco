@@ -1,12 +1,16 @@
 /**
  * POST /runs                      corrida con datos actuales + despacho (lo llama "Iniciar corrida" de la web)
  * POST /runs/:runId/dispatch      despachar una corrida ya calculada
- * POST /calls/:customerId         llamar a UN cliente ("Empezar llamada")  body: { simulate?: boolean, scenario?: "ESC-C" }
+ * POST /calls/:customerId         llamar a UN cliente ("Llamar", grados C–E)  body: { simulate?: boolean, scenario?: "ESC-C" }
+ * POST /calls/:conversationId/hangup   colgar una conversación en curso o atascada ("Colgar")
+ * POST /emails/:customerId        correo preventivo a UN cliente ("Enviar correo", grados A–B)
  */
 import { Hono } from 'hono';
 import { providers } from '../config.js';
 import { db } from '../lib/supabase.js';
 import { planAndDispatch, startRealCall } from '../channels/dispatch.js';
+import { reminderItemForCustomer, sendRunEmail } from '../channels/email.js';
+import { hangupConversation } from '../channels/hangup.js';
 import { loadScenario, runSimulatedCall } from '../channels/simulated-call.js';
 import { requireAgentSecret } from './auth.js';
 
@@ -15,6 +19,7 @@ export const runsRouter = new Hono();
 runsRouter.use('/runs', requireAgentSecret);
 runsRouter.use('/runs/*', requireAgentSecret);
 runsRouter.use('/calls/*', requireAgentSecret);
+runsRouter.use('/emails/*', requireAgentSecret);
 
 const DEFAULT_FILTERS = { grades: ['A', 'B', 'C', 'D', 'E'], max_days_to_due: 10 };
 
@@ -70,6 +75,30 @@ runsRouter.post('/calls/:customerId', async (c) => {
     });
     promise.catch((err) => console.warn(`[calls] simulada ${customerId}: ${(err as Error).message}`));
     return c.json({ ok: true, mode: 'simulated', conversationId });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+runsRouter.post('/calls/:conversationId/hangup', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { created_by?: string };
+  try {
+    const result = await hangupConversation(c.req.param('conversationId'), body.created_by ?? 'web');
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    const message = (err as Error).message;
+    return c.json({ ok: false, error: message }, message.startsWith('CONVERSACION_NO_EXISTE') ? 404 : 500);
+  }
+});
+
+runsRouter.post('/emails/:customerId', async (c) => {
+  try {
+    const item = await reminderItemForCustomer(c.req.param('customerId'));
+    if (!item) return c.json({ ok: false, error: 'Cliente no encontrado' }, 404);
+    // start_conversation valida en la BD opt-out, grupo de control, consentimiento y bloqueos por regla
+    const sent = await sendRunEmail(item, 'reminder');
+    if (sent.error) return c.json({ ok: false, error: sent.error, conversationId: sent.conversationId }, 400);
+    return c.json({ ok: true, real: sent.real, conversationId: sent.conversationId });
   } catch (err) {
     return c.json({ ok: false, error: (err as Error).message }, 500);
   }

@@ -76,6 +76,7 @@ export async function runSimulatedCall(customerId: string, interventionId: strin
   let failure: string | null = null;
   try {
   for (let i = 0; i < maxTurns; i++) {
+    if (state.hangupRequested) break;
     const step = scenario?.turns[i];
     let customerText = step ? step.customer : (i === 0 ? '¿Aló?' : await simulateCustomer(persona, history));
 
@@ -96,7 +97,7 @@ export async function runSimulatedCall(customerId: string, interventionId: strin
     history.push({ role: 'user', content: customerText });
     const turn = await runAgentTurn({ state, history, voice: true });
     history.push({ role: 'assistant', content: turn.text });
-    if (turn.endCall) break;
+    if (turn.endCall || state.hangupRequested) break;
     await sleep(opts.pacingMs ?? 2500);   // ritmo visible en la vista en vivo y alivia la cuota de Gemini
   }
   } catch (err) {

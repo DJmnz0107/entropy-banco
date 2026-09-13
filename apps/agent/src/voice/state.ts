@@ -31,6 +31,7 @@ export interface ConversationState {
   abuse: number;                       // ElevenLabs cancela y reenvía turnos: solo el último cuenta
   customerSpoke: boolean;
   confirmationEmailSent: boolean;
+  hangupRequested: boolean;                 // "Colgar" desde la web: el agente se despide y deja de responder
   supervisor: Promise<void> | null;         // evaluación del turno anterior (asíncrona)
   customerLogged: Promise<{ message_id: string } | null> | null;
   startedAt: number;
@@ -85,6 +86,8 @@ export async function getState(conversationId: string): Promise<ConversationStat
     abuse: 0,
     customerSpoke: row.turn_count > 0,
     confirmationEmailSent: false,
+    // si la conversación ya se cerró (p. ej. colgada desde la web y el estado se reconstruye), no se sigue hablando
+    hangupRequested: row.status !== 'active',
     supervisor: null,
     customerLogged: null,
     startedAt: new Date(row.started_at).getTime(),

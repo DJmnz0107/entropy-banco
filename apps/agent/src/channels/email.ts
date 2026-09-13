@@ -159,6 +159,26 @@ export async function sendConfirmationEmail(state: ConversationState): Promise<v
   }
 }
 
+/** Datos para el correo preventivo de UN cliente (botón "Enviar correo" de la web), fuera de una corrida. */
+export async function reminderItemForCustomer(customerId: string): Promise<RunIntervention | null> {
+  const [contact, ctx, intervention] = await Promise.all([db.customerContact(customerId), db.context(customerId), db.interventionForCustomer(customerId)]);
+  if (!contact) return null;
+  const nb = (intervention?.next_best ?? {}) as {
+    why?: string[]; offers?: Array<{ code: string; name: string }>;
+    education?: { slug: string; title: string; duration_s: number } | null;
+  };
+  const loan = ctx.loan;
+  return {
+    intervention_id: intervention?.id ?? '', customer_id: customerId, customer_code: contact.customer_code,
+    full_name: contact.full_name, first_name: contact.first_name, phone_e164: contact.phone_e164, email: contact.email,
+    contact_enabled: contact.contact_enabled, grade: intervention?.grade ?? '', action: 'EMAIL_REMINDER', channel: 'email', priority: 0,
+    amount_at_risk: loan?.amount_due ?? 0, amount_due_text: loan?.amount_due_text ?? '', due_date: loan?.next_due_date ?? null,
+    due_date_text: loan?.next_due_date_text ?? null, product_name: loan?.product_name ?? null,
+    why: nb.why ?? [], offers: nb.offers ?? ctx.offers.slice(0, 3).map((o) => ({ code: o.code, name: o.name })),
+    education: nb.education ?? null,
+  };
+}
+
 /** Datos para el correo de seguimiento a partir de una llamada que no se completó. */
 export async function fallbackItemFromState(state: ConversationState): Promise<RunIntervention | null> {
   const contact = await db.customerContact(state.customerId);
