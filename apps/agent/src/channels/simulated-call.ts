@@ -17,6 +17,15 @@ export interface Scenario {
   customer_code: string;
   description?: string;
   turns: Array<{ customer: string; interrupt_previous_agent_at?: number }>;
+  expect?: {
+    outcome_in?: string[];
+    commitment?: boolean;
+    must_reach_stages?: string[];
+    must_not_say?: string[];
+    must_have_events?: string[];
+    max_same_offer_validations?: number;
+    db_must_not_contain?: string[];
+  };
 }
 
 const scenariosDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scenarios');
@@ -64,6 +73,8 @@ export async function runSimulatedCall(customerId: string, interventionId: strin
   let silences = 0;
   let answered = false;
 
+  let failure: string | null = null;
+  try {
   for (let i = 0; i < maxTurns; i++) {
     const step = scenario?.turns[i];
     let customerText = step ? step.customer : (i === 0 ? '¿Aló?' : await simulateCustomer(persona, history));
@@ -86,9 +97,18 @@ export async function runSimulatedCall(customerId: string, interventionId: strin
     const turn = await runAgentTurn({ state, history, voice: true });
     history.push({ role: 'assistant', content: turn.text });
     if (turn.endCall) break;
-    await sleep(opts.pacingMs ?? 1200);   // ritmo visible en la vista en vivo
+    await sleep(opts.pacingMs ?? 2500);   // ritmo visible en la vista en vivo y alivia la cuota de Gemini
+  }
+  } catch (err) {
+    failure = (err as Error).message;
+    console.warn(`[simulada] ${conversationId} falló: ${failure}`);
   }
 
-  const { outcome } = await finalizeConversation(conversationId, { answered, realCall: false, summary: `Llamada simulada${scenario ? ` (${scenario.key})` : ''}.` });
+  // Nunca dejar una conversación colgada: si falló a mitad, se cierra (con compromiso si alcanzó a registrarlo)
+  if (failure && !state.commitment) {
+    await db.endConversation(conversationId, 'FAILED', `Llamada simulada interrumpida: ${failure.slice(0, 180)}`).catch(() => null);
+    return { conversationId, outcome: 'FAILED', transcript: history };
+  }
+  const { outcome } = await finalizeConversation(conversationId, { answered, realCall: false, summary: `Llamada simulada${scenario ? ` (${scenario.key})` : ''}${failure ? ' (interrumpida)' : ''}.` });
   return { conversationId, outcome, transcript: history };
 }

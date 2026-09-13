@@ -3,7 +3,8 @@
  * Idempotente: ElevenLabs puede reintentar el webhook.
  */
 import { providers } from '../config.js';
-import { db } from '../lib/supabase.js';
+import { gemini, modelFor } from '../lib/llm.js';
+import { db, supabase } from '../lib/supabase.js';
 import { dropState, getState, type ConversationState } from '../voice/state.js';
 import { fallbackItemFromState, sendConfirmationEmail, sendRunEmail } from './email.js';
 
@@ -39,7 +40,12 @@ export async function finalizeConversation(conversationId: string, opts: {
   await settle(state?.supervisor ?? null, 5000);
 
   const outcome = opts.failureReason && !opts.answered ? 'NO_ANSWER' : decideOutcome(state, opts.answered);
-  await db.endConversation(conversationId, outcome, opts.summary ?? null, opts.failureReason ? { reason: opts.failureReason } : {});
+  // El resumen de ElevenLabs llega en inglés: se genera uno en español desde nuestra transcripción (el original queda en meta)
+  const summary = opts.answered ? (await spanishSummary(conversationId, outcome, state).catch(() => null)) ?? opts.summary ?? null : opts.summary ?? null;
+  await db.endConversation(conversationId, outcome, summary, {
+    ...(opts.failureReason ? { reason: opts.failureReason } : {}),
+    ...(opts.summary && opts.summary !== summary ? { provider_summary: opts.summary } : {}),
+  });
 
   if (opts.realCall && opts.durationSecs) {
     await Promise.all([
@@ -61,6 +67,22 @@ export async function finalizeConversation(conversationId: string, opts: {
   dropState(conversationId);
   console.log(`[finalize] ${conversationId} → ${outcome} (${opts.realCall ? providers.voice() : 'simulada'})`);
   return { outcome, alreadyClosed: false };
+}
+
+async function spanishSummary(conversationId: string, outcome: string, state: ConversationState | null): Promise<string | null> {
+  const { data } = await supabase.from('messages').select('role,content').eq('conversation_id', conversationId)
+    .in('role', ['agent', 'customer']).order('seq').limit(80);
+  if (!data?.length) return null;
+  const transcript = data.map((m) => `${m.role === 'agent' ? 'Agente' : 'Cliente'}: ${m.content}`).join('\n').slice(0, 9000);
+  const model = await modelFor('supervisor');
+  const res = await gemini.chat.completions.create({
+    model: model.modelId, temperature: 0, max_tokens: 220,
+    messages: [
+      { role: 'system', content: 'Resume en ESPAÑOL, en 2 o 3 frases y en tercera persona, una llamada de cobranza preventiva de Bancoagrícola. Incluye: situación del cliente, lo acordado (fecha y monto solo si aparecen en la transcripción) y el resultado final. Sin inventar datos. Sin viñetas.' },
+      { role: 'user', content: `Resultado registrado: ${outcome}${state?.commitment ? ` · compromiso ${state.commitment.receipt}` : ' · sin compromiso registrado'}\n\nTranscripción:\n${transcript}` },
+    ],
+  }, { timeout: 8000 });
+  return res.choices[0]?.message?.content?.trim() || null;
 }
 
 async function settle(p: Promise<unknown> | null, ms: number): Promise<void> {

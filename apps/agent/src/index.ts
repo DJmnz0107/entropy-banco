@@ -27,18 +27,23 @@ app.get('/', (c) => c.json({
   },
 }));
 
-// Meta WhatsApp webhook (verificación + recepción) — lo usa el bot de WhatsApp
-app.get('/webhook', (c) => {
-  const mode = c.req.query('hub.mode');
-  const token = c.req.query('hub.verify_token');
-  const challenge = c.req.query('hub.challenge');
-  if (mode === 'subscribe' && token === (process.env.META_VERIFY_TOKEN ?? '')) return c.text(challenge ?? '');
-  return c.text('Forbidden', 403);
-});
-app.post('/webhook', async (c) => {
-  const body = await c.req.json().catch(() => null);
-  console.log('[webhook] Meta event:', JSON.stringify(body));
-  return c.text('EVENT_RECEIVED', 200);
+// Meta WhatsApp webhook → se reenvía al bot de WhatsApp (backend/whatsapp-hackathon-bot, puerto 3002).
+// Así ngrok expone UNA sola URL para ElevenLabs (agente) y Meta (bot).
+app.all('/webhook', async (c) => {
+  const target = new URL(c.req.url);
+  const url = `${config.whatsappBotUrl}/webhook${target.search}`;
+  try {
+    const res = await fetch(url, {
+      method: c.req.method,
+      headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
+      body: c.req.method === 'GET' ? undefined : await c.req.text(),
+    });
+    return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': res.headers.get('content-type') ?? 'text/plain' } });
+  } catch (err) {
+    console.warn(`[webhook] bot de WhatsApp no disponible en ${config.whatsappBotUrl}: ${(err as Error).message}`);
+    // Meta reintenta si no respondemos 200; mejor avisar que el bot está caído
+    return c.text('WhatsApp bot unavailable', 502);
+  }
 });
 
 app.route('/health', healthRouter);

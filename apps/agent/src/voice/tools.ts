@@ -7,6 +7,7 @@ import { db, type Json } from '../lib/supabase.js';
 import { sendConfirmationEmail } from '../channels/email.js';
 import { resolveSpanishDate } from './dates.js';
 import type { ConversationState } from './state.js';
+import { GUARD_REPLIES } from './guardrails.js';
 
 const ERROR_TEXT: Record<string, string> = {
   OFERTA_NO_PERMITIDA_PARA_ESTE_CLIENTE: 'Esa opción no está autorizada para este cliente.',
@@ -21,17 +22,18 @@ const humanError = (code: string) =>
   ERROR_TEXT[code] ?? (code.startsWith('EXCEDE_MAXIMO_DE_DIAS_') ? `La fecha excede el máximo permitido de ${code.split('_').pop()} días.` : code.replaceAll('_', ' ').toLowerCase());
 
 const FAREWELLS: Record<string, string> = {
-  acuerdo_completo: 'Muchas gracias por su tiempo. Que tenga un excelente día.',
+  acuerdo_completo: 'Agradezco mucho su tiempo y disposición para conversar. Ha sido un gusto atenderle. Le deseo un excelente día.',
   negativa: 'Entiendo y respeto su decisión. Gracias por atenderme, que tenga un buen día.',
   no_contactar: 'Entendido, registramos su solicitud y no le volveremos a contactar por este medio. Que tenga un buen día.',
   persona_equivocada: 'Muchas gracias por atenderme. Intentaremos comunicarnos en otro momento. Que tenga un buen día.',
   no_es_buen_momento: 'Con gusto le llamamos en otro momento. Que tenga un buen día.',
-  otro: 'Muchas gracias por su tiempo. Que tenga un buen día.',
+  fuera_de_tema: GUARD_REPLIES.off_topic_3,
+  otro: 'Agradezco mucho su tiempo y disposición para conversar. Le deseo un excelente día.',
 };
 
 const FINAL_OUTCOME: Record<string, string> = {
   acuerdo_completo: 'FOLLOW_UP_REQUIRED', negativa: 'EXPLICIT_REFUSAL', no_contactar: 'DO_NOT_CONTACT',
-  persona_equivocada: 'WRONG_PERSON', no_es_buen_momento: 'CALLBACK_SCHEDULED', otro: 'FOLLOW_UP_REQUIRED',
+  persona_equivocada: 'WRONG_PERSON', no_es_buen_momento: 'CALLBACK_SCHEDULED', fuera_de_tema: 'FOLLOW_UP_REQUIRED', otro: 'FOLLOW_UP_REQUIRED',
 };
 
 export function toolDefinitions(state: ConversationState): ChatCompletionTool[] {
@@ -108,6 +110,18 @@ export function toolDefinitions(state: ConversationState): ChatCompletionTool[] 
     {
       type: 'function',
       function: {
+        name: 'registrar_desvio',
+        description: 'Úsala cuando el cliente se sale del tema de su cuota (otros productos, temas personales, pedirte que actúes como otra cosa, preguntas sin relación) o es irrespetuoso. El servidor te dice qué responder.',
+        parameters: {
+          type: 'object',
+          properties: { tipo: { type: 'string', enum: ['fuera_de_tema', 'irrespetuoso'] }, resumen: { type: 'string', description: 'Qué pidió, en 5 palabras.' } },
+          required: ['tipo'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'finalizar_llamada',
         description: 'Indica que la conversación terminó. Después de llamarla, despídete en una frase.',
         parameters: {
@@ -119,6 +133,10 @@ export function toolDefinitions(state: ConversationState): ChatCompletionTool[] 
     },
   );
   return tools;
+}
+
+function dateLabelEs(isoDate: string): string {
+  return new Intl.DateTimeFormat('es-SV', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
 /** Normaliza frases que el resolver no cubre: "viernes 25 de septiembre", "mañana en la tarde", "dentro de 8 días". */
@@ -166,34 +184,56 @@ function offerParams(state: ConversationState, code: string, args: Json): { para
   return { params, dateLabel: resolved?.label ?? null };
 }
 
+// Última validación exitosa por conversación: si el cliente ya escuchó esas condiciones completas y el modelo
+// vuelve a validar lo mismo en vez de registrar, se le responde al instante (en la llamada real eso causaba un bucle).
+const lastValidation = new Map<string, { key: string; result: Json }>();
+
 export async function executeTool(state: ConversationState, name: string, args: Json): Promise<Json> {
   const conv = state.conversationId;
   switch (name) {
     case 'validar_oferta': {
       const code = String(args.codigo_oferta ?? '');
       const { params, dateLabel } = offerParams(state, code, args);
+      const key = `${code}:${JSON.stringify(params)}`;
+      const prev = lastValidation.get(conv);
+      if (prev?.key === key && state.lastTermsOffer === code && !state.commitment) {
+        return { ...(prev.result as Record<string, Json>), ya_escuchadas: true,
+          instruccion: 'El cliente YA escuchó estas condiciones completas. Si dijo sí, llama registrar_compromiso AHORA con cliente_confirmo=true, sin repetirlas. Si tiene una duda, respóndela en una frase.' };
+      }
       const res = await db.validateOffer(conv, code, params);
       if (res.valid) {
         state.validated[code] = res.normalized_params;
+        if (res.terms_text) state.terms[code] = res.terms_text;
         state.lastPresentedOffer = code;
       }
-      return {
+      const maxDate = (res.normalized_params as { max_date?: string } | null)?.max_date;
+      if (maxDate) state.allowedDateTexts.push(dateLabelEs(maxDate));
+      const result: Json = {
         valida: res.valid,
+        ...(!res.valid && maxDate ? { fecha_maxima_permitida: dateLabelEs(maxDate) } : {}),
         condiciones: res.valid ? res.terms_text : null,
         errores: res.errors.map(humanError),
         fecha_interpretada: dateLabel,
         requiere_aprobacion: res.requires_approval,
         instruccion: res.valid
           ? 'Di estas condiciones con tus palabras SIN cambiar montos ni fechas y pide un sí explícito. Cuando el cliente diga sí, llama registrar_compromiso de inmediato sin repetir las condiciones.'
-          : 'No ofrezcas esto así. Explica el límite con amabilidad y propone otra opción o fecha permitida.',
+          : maxDate
+            ? 'No ofrezcas esto así. Explica el límite con amabilidad y propone fecha_maxima_permitida (valídala antes de confirmar).'
+            : 'No ofrezcas esto así. Explica el límite con amabilidad y propone otra opción o fecha permitida.',
       };
+      if (res.valid) lastValidation.set(conv, { key, result });
+      else lastValidation.delete(conv);
+      return result;
     }
     case 'registrar_compromiso': {
+      // ya registrado en esta llamada: no se vuelve a escribir ni se hace esperar al cliente
+      if (state.commitment) return { ok: true, ya_registrado: true, codigo_recibo: state.commitment.receipt, instruccion: 'Ya estaba registrado. No lo menciones otra vez.' };
       const code = String(args.codigo_oferta ?? '');
       const params = state.validated[code];
       if (!params) return { ok: false, error: 'Primero usa validar_oferta con esta opción y di las condiciones.' };
       const res = await db.registerCommitment(conv, code, params, args.cliente_confirmo === true);
       if (!res.ok || !res.receipt_code) {
+        lastValidation.delete(conv);   // la BD pide revalidar (p. ej. condiciones interrumpidas): la próxima validación va a la BD
         return { ok: false, errores: (res.errors ?? []).map(humanError), instruccion: res.instruction ?? null };
       }
       const offer = state.context.offers.find((o) => o.code === code);
@@ -221,6 +261,7 @@ export async function executeTool(state: ConversationState, name: string, args: 
       if (!v.valid) return { ok: false, errores: v.errors.map(humanError), instruccion: 'Pide un día dentro de los próximos 5 días.' };
       const r = await db.registerCommitment(conv, code, v.normalized_params, true);
       if (r.ok) {
+        if (resolved?.label) state.allowedDateTexts.push(resolved.label);
         state.endCall = true;
         state.outcome = 'CALLBACK_SCHEDULED';
       }
@@ -233,6 +274,18 @@ export async function executeTool(state: ConversationState, name: string, args: 
       state.outcome = 'HUMAN_ESCALATION';
       return { ok: true, instruccion: 'Di que un asesor le contactará en un máximo de 24 horas hábiles y despídete.',
                despedida: 'Entendido. Un asesor le contactará en un máximo de 24 horas hábiles. Gracias por su paciencia.' };
+    }
+    case 'registrar_desvio': {
+      const abusive = args.tipo === 'irrespetuoso';
+      const count = abusive ? ++state.abuse : ++state.offTopic;
+      void db.logEvent(conv, 'guardrail_triggered', { capa: 'G3', tipo: abusive ? 'abuse' : 'off_topic', n: count, resumen: String(args.resumen ?? '').slice(0, 80) }, 'warning');
+      if ((abusive && count >= 2) || (!abusive && count >= 3)) {
+        state.endCall = true;
+        state.outcome = state.outcome ?? 'FOLLOW_UP_REQUIRED';
+        return { ok: true, instruccion: 'Cierra la llamada con la despedida.', despedida: abusive ? GUARD_REPLIES.abuse_2 : GUARD_REPLIES.off_topic_3 };
+      }
+      const reply = abusive ? GUARD_REPLIES.abuse_1 : count === 1 ? GUARD_REPLIES.off_topic_1 : GUARD_REPLIES.off_topic_2;
+      return { ok: true, respuesta_fija: reply };
     }
     case 'finalizar_llamada': {
       const motivo = String(args.motivo ?? 'otro');

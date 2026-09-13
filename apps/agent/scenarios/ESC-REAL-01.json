@@ -1,0 +1,22 @@
+{
+  "key": "ESC-REAL-01",
+  "customer_code": "DEMO-005",
+  "description": "Reproduce la 1ª llamada real (13-sept): saluda antes de confirmar, le pagan después del vencimiento, pide recomendación, propone fecha fuera de límite, pregunta por intereses y dice 'sí' varias veces.",
+  "turns": [
+    { "customer": "Hola, ¿qué tal? Sí, sí, sí, soy yo." },
+    { "customer": "Sí, dígame." },
+    { "customer": "Es que ahorita no me han pagado, me pagan hasta el 22 de septiembre, entonces no sé." },
+    { "customer": "¿Cuál me recomienda usted?" },
+    { "customer": "Mejor póngamelo para el 30 de septiembre." },
+    { "customer": "Ah, bueno, entonces el 22 está bien." },
+    { "customer": "Sí, es correcto." },
+    { "customer": "¿Pero no me van a cobrar intereses?" },
+    { "customer": "Sí, está bien, envíemelo por correo. Gracias." }
+  ],
+  "expect": {
+    "outcome_in": ["DATE_EXTENSION_AGREED", "PAYMENT_COMMITMENT", "PARTIAL_PAYMENT_AGREED", "PAYMENT_PLAN_AGREED"],
+    "commitment": true,
+    "max_same_offer_validations": 3,
+    "must_not_say": ["15 días", "quince días", "50 %", "50%", "cincuenta por ciento", "disculpe la interrupción", "ningún interés"]
+  }
+}

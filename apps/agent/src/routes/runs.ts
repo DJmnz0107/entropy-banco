@@ -11,7 +11,10 @@ import { loadScenario, runSimulatedCall } from '../channels/simulated-call.js';
 import { requireAgentSecret } from './auth.js';
 
 export const runsRouter = new Hono();
-runsRouter.use('*', requireAgentSecret);
+// Solo estas rutas llevan secreto (este router se monta en '/': un use('*') bloquearía también el Custom LLM y los webhooks)
+runsRouter.use('/runs', requireAgentSecret);
+runsRouter.use('/runs/*', requireAgentSecret);
+runsRouter.use('/calls/*', requireAgentSecret);
 
 const DEFAULT_FILTERS = { grades: ['A', 'B', 'C', 'D', 'E'], max_days_to_due: 10 };
 

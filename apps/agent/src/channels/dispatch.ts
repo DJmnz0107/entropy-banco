@@ -2,8 +2,8 @@
  * Ejecuta una corrida: C–E → llamada (ElevenLabs o simulada), A–B → correo,
  * C–E que no se pueden llamar → correo de seguimiento. La política vive en la BD.
  */
-import { config, providers } from '../config.js';
-import { outboundCall } from '../lib/elevenlabs.js';
+import { callChannel, config, providers } from '../config.js';
+import { outboundCall, outboundWhatsAppCall } from '../lib/elevenlabs.js';
 import { db, type RunIntervention } from '../lib/supabase.js';
 import { getState } from '../voice/state.js';
 import { sendRunEmail } from './email.js';
@@ -25,25 +25,41 @@ export interface DispatchPlan {
 
 const running = new Set<string>();
 
+/** "Buenos días/tardes/noches" según la hora de El Salvador (primer mensaje del guion del banco). */
+export function greetingSv(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: 'America/El_Salvador' }).format(now));
+  return hour < 12 ? 'Buenos días' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
+}
+
 function isRealEmail(item: RunIntervention): boolean {
   return providers.email() === 'resend' && item.contact_enabled && !!item.email && !/\.test$|\.invalid$/i.test(item.email);
 }
 
-/** Llamada real a un cliente con ElevenLabs. Si falla, cierra como no contestada y manda correo. */
+/** Llamada real con ElevenLabs (por WhatsApp si está configurado). Si falla, cierra como no contestada y manda correo. */
 export async function startRealCall(item: Pick<RunIntervention, 'customer_id' | 'intervention_id' | 'phone_e164' | 'first_name' | 'full_name' | 'grade' | 'amount_due_text' | 'due_date_text'>): Promise<{ conversationId: string; elevenlabsConversationId: string | null }> {
   if (!item.phone_e164) throw new Error('El cliente no tiene teléfono');
+  const t0 = Date.now();
   const start = await db.startConversation(item.customer_id, 'voice', item.intervention_id || null);
   const conversationId = start.conversation_id;
+  const tStart = Date.now();
   await getState(conversationId);   // precarga el contexto: el primer turno responde más rápido
+  const tState = Date.now();
   try {
-    const res = await outboundCall(item.phone_e164, {
+    const dial = callChannel() === 'whatsapp' ? outboundWhatsAppCall : outboundCall;
+    const res = await dial(item.phone_e164, {
       conversation_id: conversationId,
+      saludo: greetingSv(),
       nombre: item.first_name,
       nombre_completo: item.full_name,
       grado: item.grade ?? '',
       monto: item.amount_due_text ?? '',
       fecha: item.due_date_text ?? '',
     });
+    const tDial = Date.now();
+    // tiempos hasta que ElevenLabs acepta la llamada (en la 1ª llamada real pasó ~1 min hasta que sonó)
+    const timing = { start_conversation_ms: tStart - t0, preload_ms: tState - tStart, elevenlabs_dial_ms: tDial - tState, total_ms: tDial - t0 };
+    console.log(`[dispatch] llamada ${conversationId}`, timing);
+    void db.logEvent(conversationId, 'call_dialing', timing);
     if (res.conversationId) await db.setExternalId(conversationId, res.conversationId);
     return { conversationId, elevenlabsConversationId: res.conversationId };
   } catch (err) {

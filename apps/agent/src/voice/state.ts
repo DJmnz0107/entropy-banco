@@ -16,12 +16,19 @@ export interface ConversationState {
   pace: 'slow' | 'normal' | 'fast';
   pendingControl: string | null;
   validated: Record<string, Json>;          // oferta → parámetros normalizados por la BD
+  terms: Record<string, string>;            // oferta → condiciones exactas devueltas por la BD (texto autorizado)
+  allowedDateTexts: string[];               // fechas que el banco devolvió (máximos permitidos, rellamadas)
   lastPresentedOffer: string | null;
   commitment: { receipt: string; code: string; status: string; requiresApproval: boolean; generatesPaymentLink: boolean } | null;
   endCall: boolean;
   outcome: string | null;
   lastAgentText: string | null;
   lastAgentMessageId: string | null;
+  lastTermsOffer: string | null;            // oferta cuyas condiciones iban en el último mensaje completo del agente
+  lastUser: { index: number; text: string; messageId: string | null } | null;   // para no duplicar al cliente
+  requestSeq: number;
+  offTopic: number;                         // desvíos de tema (protocolo 1-2-3, docs/REGLAS-AGENTE-VOZ.md §4.5)
+  abuse: number;                       // ElevenLabs cancela y reenvía turnos: solo el último cuenta
   customerSpoke: boolean;
   confirmationEmailSent: boolean;
   supervisor: Promise<void> | null;         // evaluación del turno anterior (asíncrona)
@@ -60,6 +67,8 @@ export async function getState(conversationId: string): Promise<ConversationStat
     pace: 'normal',
     pendingControl: null,
     validated: {},
+    terms: {},
+    allowedDateTexts: [],
     lastPresentedOffer: null,
     commitment: commitment ? {
       receipt: commitment.receipt_code, code: commitment.offer_code, status: commitment.status,
@@ -69,6 +78,11 @@ export async function getState(conversationId: string): Promise<ConversationStat
     outcome: null,
     lastAgentText: null,
     lastAgentMessageId: null,
+    lastTermsOffer: null,
+    lastUser: null,
+    requestSeq: 0,
+    offTopic: 0,
+    abuse: 0,
     customerSpoke: row.turn_count > 0,
     confirmationEmailSent: false,
     supervisor: null,

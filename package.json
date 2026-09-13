@@ -11,7 +11,9 @@
     "db:metrics": "node supabase/tests/run.mjs supabase/tests/metrics.sql",
     "db:push": "bash scripts/db-push.sh",
     "agent:dev": "npm run dev --workspace=apps/agent",
-    "agent:build": "npm run build --workspace=apps/agent"
+    "agent:build": "npm run build --workspace=apps/agent",
+    "bot:dev": "cd backend/whatsapp-hackathon-bot && PORT=3002 node --watch index.js",
+    "tunnel": "ngrok http 3000"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0",

@@ -73,6 +73,8 @@ export const db = {
   startSimulated: (customerId: string, channel: string, interventionId?: string | null) =>
     rpc<StartResult>('start_simulated_conversation', { p_customer_id: customerId, p_channel: channel, p_intervention_id: interventionId ?? null }),
 
+  logEvent: (conversationId: string, type: string, payload: Json = {}, severity: 'info' | 'warning' | 'error' = 'info') =>
+    rpc<null>('log_event', { p_conversation_id: conversationId, p_type: type, p_payload: payload, p_severity: severity }).catch(() => null),
   logMessage: (conversationId: string, role: 'agent' | 'customer' | 'system' | 'tool', content: string, meta: Json = {}) =>
     rpc<{ message_id: string; seq: number }>('log_message', { p_conversation_id: conversationId, p_role: role, p_content: content, p_meta: meta }),
   evaluateTurn: (conversationId: string, scorecard: Json, messageId?: string, meta: Json = {}) =>

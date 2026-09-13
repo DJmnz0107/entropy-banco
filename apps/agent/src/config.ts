@@ -27,7 +27,12 @@ export const config = {
   elevenlabs: {
     apiKey: env('ELEVENLABS_API_KEY'),
     agentId: env('ELEVENLABS_AGENT_ID'),
-    phoneNumberId: env('ELEVENLABS_PHONE_NUMBER_ID'),
+    phoneNumberId: env('ELEVENLABS_PHONE_NUMBER_ID'),                 // solo si se usara telefonía (Twilio/SIP)
+    /** WhatsApp importado en ElevenLabs (panel → WhatsApp → Import account). Es el canal de llamadas que usamos. */
+    whatsappPhoneNumberId: env('ELEVENLABS_WHATSAPP_PHONE_NUMBER_ID'),
+    /** Plantilla de Meta con componente "call permission request" (aprobada en WhatsApp Manager). */
+    whatsappCallPermissionTemplate: env('WHATSAPP_CALL_PERMISSION_TEMPLATE'),
+    whatsappCallPermissionTemplateLang: env('WHATSAPP_CALL_PERMISSION_TEMPLATE_LANG') ?? 'es',
     webhookSecret: env('ELEVENLABS_WEBHOOK_SECRET'),
   },
   customLlmSecret: env('CUSTOM_LLM_SECRET'),
@@ -39,6 +44,8 @@ export const config = {
 
   /** Secreto que la web manda en `x-agent-secret` para iniciar corridas. */
   agentSharedSecret: env('AGENT_SHARED_SECRET'),
+  /** Bot de WhatsApp (Meta Cloud API) al que se reenvía /webhook: una sola URL pública para agente + bot. */
+  whatsappBotUrl: (env('WHATSAPP_BOT_URL') ?? 'http://localhost:3002').replace(/\/$/, ''),
   /** Base pública de la web (links de pago y videos). */
   publicWebUrl: (env('PUBLIC_WEB_URL') ?? 'http://localhost:3001').replace(/\/$/, ''),
 
@@ -51,9 +58,16 @@ export const config = {
 
 export const providers = {
   voice: (): 'elevenlabs' | 'simulated' =>
-    config.elevenlabs.apiKey && config.elevenlabs.agentId && config.elevenlabs.phoneNumberId ? 'elevenlabs' : 'simulated',
+    config.elevenlabs.apiKey && config.elevenlabs.agentId && (callChannel() !== null) ? 'elevenlabs' : 'simulated',
   email: (): 'resend' | 'simulated' => (config.resend.apiKey ? 'resend' : 'simulated'),
 };
+
+/** Canal por el que ElevenLabs hace la llamada real: WhatsApp (preferido) o telefonía. */
+export function callChannel(): 'whatsapp' | 'phone' | null {
+  if (config.elevenlabs.whatsappPhoneNumberId && config.elevenlabs.whatsappCallPermissionTemplate) return 'whatsapp';
+  if (config.elevenlabs.phoneNumberId) return 'phone';
+  return null;
+}
 
 export function assertCoreConfig(): void {
   const missing = [

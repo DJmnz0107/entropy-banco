@@ -2,7 +2,7 @@
  * POST /v1/chat/completions — ElevenLabs "Custom LLM" (formato OpenAI, SSE).
  * ElevenLabs manda el historial completo en cada turno; nosotros aplicamos control, tools y registro.
  */
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
@@ -39,13 +39,20 @@ async function resolveConversationId(messages: IncomingMessage[], extra: Record<
   return start.conversation_id;
 }
 
-// ElevenLabs puede agregar /chat/completions a la URL base configurada: aceptamos ambas formas
-llmRouter.post('/chat/completions', (c) => llmRouter.fetch(new Request(new URL('/v1/chat/completions', c.req.url), c.req.raw)));
-llmRouter.post('/v1/chat/completions', async (c) => {
-  if (config.customLlmSecret) {
-    const auth = c.req.header('authorization') ?? '';
-    if (auth !== `Bearer ${config.customLlmSecret}`) return c.json({ error: 'No autorizado' }, 401);
-  }
+// Autenticación: header Authorization: Bearer <CUSTOM_LLM_SECRET>, o el secreto en la ruta /llm/<secreto>/...
+// (ElevenLabs guarda la URL del Custom LLM; así no hace falta crear un secreto de workspace).
+function authorized(c: { req: { header: (n: string) => string | undefined; param: (n: string) => string | undefined } }): boolean {
+  if (!config.customLlmSecret) return true;
+  return c.req.header('authorization') === `Bearer ${config.customLlmSecret}` || c.req.param('token') === config.customLlmSecret;
+}
+
+// ElevenLabs puede usar la URL tal cual o agregarle /chat/completions: aceptamos todas las formas
+for (const path of ['/v1/chat/completions', '/chat/completions', '/llm/:token', '/llm/:token/chat/completions', '/llm/:token/v1/chat/completions']) {
+  llmRouter.post(path, (c) => handleCompletion(c));
+}
+
+async function handleCompletion(c: Context) {
+  if (!authorized(c)) return c.json({ error: 'No autorizado' }, 401);
   const body = (await c.req.json().catch(() => ({}))) as {
     messages?: IncomingMessage[]; tools?: Array<{ function?: { name?: string } }>; elevenlabs_extra_body?: Record<string, unknown>;
   };
@@ -58,6 +65,8 @@ llmRouter.post('/v1/chat/completions', async (c) => {
 
   return streamSSE(c, async (stream) => {
     let conversationId: string | null = null;
+    let aborted = false;
+    stream.onAbort(() => { aborted = true; });
     try {
       conversationId = await resolveConversationId(messages, body.elevenlabs_extra_body);
       if (!conversationId) {
@@ -67,6 +76,9 @@ llmRouter.post('/v1/chat/completions', async (c) => {
         return;
       }
       const state = await getState(conversationId);
+      // Si el cliente sigue hablando, ElevenLabs cancela este request y manda otro: el viejo deja de hablar y de registrar
+      const seq = ++state.requestSeq;
+      const isStale = () => aborted || c.req.raw.signal.aborted || state.requestSeq !== seq;
       const history: HistoryMessage[] = messages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({ role: m.role as 'user' | 'assistant', content: textOf(m.content) }))
@@ -74,7 +86,7 @@ llmRouter.post('/v1/chat/completions', async (c) => {
 
       let first = true;
       const result = await runAgentTurn({
-        state, history, voice: true,
+        state, history, voice: true, isStale,
         onText: (text) => {
           void stream.writeSSE({ data: chunk(first ? { role: 'assistant', content: text } : { content: text }) });
           first = false;
@@ -95,4 +107,4 @@ llmRouter.post('/v1/chat/completions', async (c) => {
       await stream.writeSSE({ data: '[DONE]' });
     }
   });
-});
+}

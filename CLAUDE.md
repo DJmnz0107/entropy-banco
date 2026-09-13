@@ -27,7 +27,7 @@ Documentos:
 | Tema | Decisión |
 |---|---|
 | Fuente de verdad **y** lógica de negocio | **Supabase (Postgres)**: tablas + funciones RPC + vistas + Realtime |
-| Canales | Voz (Josué) · WhatsApp vía Twilio Sandbox (compañero) · Web Next.js (2 personas) |
+| Canales | Voz (Josué) · WhatsApp vía **Meta Cloud API** (Diego) · Web Next.js (2 personas). Proveedores independientes sobre la misma BD |
 | LLM | **Gemini**, configurable por fila en `ai_model_profiles` (no hardcodear modelos) |
 | Concepto | **Motor de Prevención / Next Best Intervention**: detectar → decidir la mejor intervención → contactar → adaptar → resolver → educar → seguir → medir → aprender. La voz es un brazo, no el producto |
 | Segmentación | Calificación preventiva **A–E** (= bandas de riesgo) + categoría regulatoria SSF A1–E (por días de atraso). Llamadas priorizadas a C–D; E → humano |
@@ -35,7 +35,7 @@ Documentos:
 | Política de la corrida | `agent_policies.channel_by_grade`: **C–E llamada, A–B correo (Resend)**; C–E sin respuesta → correo (`email_fallback`). Topes `max_calls_per_run` / `max_simulated_calls_per_run` |
 | Modelos Gemini | `gemini-3.1-flash-lite` (cerebro, supervisor, cliente simulado). `gemini-2.5-flash-lite` NO disponible para cuentas nuevas |
 | Supervisor / WhatsApp | Gemini Flash-Lite (endpoint compatible OpenAI) |
-| Demo de voz | Navegador (WebRTC), **no** telefonía |
+| Demo de voz | **Llamada telefónica real**: ElevenLabs + número de EE. UU. en Twilio → celular de El Salvador (~$0.29/min Twilio + minutos de ElevenLabs). WhatsApp de Meta no sirve para llamadas (número de prueba, sin calling). Setup: `npx tsx apps/agent/src/scripts/setup-twilio-voice.ts` |
 | Datos | 100% ficticios, seed determinista, fechas relativas a hoy (America/El_Salvador) |
 
 Reemplaza decisiones anteriores (OpenAI, Vapi, backend TS `packages/core`): la lógica compartida está en SQL
@@ -151,5 +151,5 @@ compromisos, links, handoffs y escalaciones. Ver la tabla de personajes en `docs
 
 ## Fuera de alcance
 
-ML entrenado, fine-tuning, banca real, pagos reales, PSTN en demo, voz entrante, multi-idioma, RAG, colas, tests de UI.
+ML entrenado, fine-tuning, banca real, pagos reales, voz entrante, multi-idioma, RAG, colas, tests de UI.
 Si una tarea empuja hacia esto, decirlo y proponer la versión mínima.

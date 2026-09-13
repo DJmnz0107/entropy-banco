@@ -58,7 +58,7 @@ La política de canales está en `agent_policies` y se edita sin tocar código:
 Web (`web-banco/apps/dashboard/.env.local`): `AGENT_BASE_URL=http://localhost:3000` y `AGENT_SHARED_SECRET=<la misma>`.
 
 ### 3. ElevenLabs (panel)
-1. **Twilio:** cuenta de pago → comprar número → en ElevenLabs *Phone numbers → Import from Twilio* → copiar el ID a `ELEVENLABS_PHONE_NUMBER_ID`.
+1. **Twilio:** Upgrade (cuenta de pago) → comprar número de EE. UU. con Voice en la consola → `npx tsx apps/agent/src/scripts/setup-twilio-voice.ts` (habilita llamadas a El Salvador, importa el número en ElevenLabs, le asigna el agente y escribe `ELEVENLABS_PHONE_NUMBER_ID`). Twilio no vende números de El Salvador por API; el de EE. UU. llama a SV sin problema.
 2. **URL pública del agente:** `ngrok http 3000` (hay `NGROK_AUTH_TOKEN` en `.env`) o deploy en Railway.
 3. **Crear agente** → copiar el ID a `ELEVENLABS_AGENT_ID`:
    - Idioma: **Español**. Voz: elegir una latina y probarla.
