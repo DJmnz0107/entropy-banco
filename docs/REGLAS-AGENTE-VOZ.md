@@ -80,7 +80,7 @@ Terminales: `NEGATIVA_RESPETADA`, `ESCALADO`, `REAGENDADO`, `CIERRE_TERCERO`.
 
 ### 4.2 Negociación (R-NEG)
 - **R-NEG-1** **Primero preguntar, después ofrecer.** Orden: ¿podrá pagar completo en la fecha? → si no, ¿cuándo recibe ingresos? → proponer la fecha que dijo el cliente. No enumerar opciones antes de conocer la situación.
-- **R-NEG-2** Si el cliente dice una fecha de ingreso ("me pagan el 16"), esa fecha (o el día siguiente) es la **primera** que se valida.
+- **R-NEG-2** Si el cliente dice una fecha de ingreso ("me pagan el 16"), esa fecha (o el día siguiente) es la **primera** que se valida. Si esa fecha es **antes** del vencimiento, no se ofrece extensión: se confirma el pago en la fecha original.
 - **R-NEG-3** **Nunca decir días de extensión, montos, porcentajes ni fechas** que no vengan de `validar_oferta` en este turno o antes. Prohibido: "hasta 15 días", "el 50 %", "sin intereses".
 - **R-NEG-4** Si pide recomendación: recomendar **una** opción con una razón basada en lo que dijo ("como le pagan el 16, lo más cómodo es mover la fecha a ese día"). No cambiar de recomendación.
 - **R-NEG-5** Si la fecha excede el límite: decir el límite como lo devuelve la herramienta y proponer la fecha máxima permitida **validada**. Máximo 2 contrapropuestas; después, seguimiento (asesor o rellamada).
@@ -163,36 +163,49 @@ No hacer commit sin que el usuario lo pida.
 - Deduplicación de mensajes del cliente, turnos cancelados sin registro, interrupciones solo si el mensaje cortado llevaba condiciones, guardia de revalidación, "sí" tras pregunta.
 - Verificación: `npx tsx apps/agent/src/scripts/test-cancel-turns.ts` → `cliente=2 · agente=2 · interrupciones=0`.
 
-### F1 — Prompt v2: persona + guion del banco + reglas R-*
+### F1 — Prompt v2: persona + guion del banco + reglas R-* ✅ (13-sept)
 - Archivos: `apps/agent/src/voice/prompt.ts`.
 - Sofía, guion por etapa (sección 3), reglas 4.1–4.6 compactas, 3 resultados, ejemplos cortos de H5–H8 bien resueltos.
 - Aceptación: prompt < ~1 800 tokens; `test-custom-llm.ts` responde en español y respeta R-ID-1.
 
-### F2 — Guardrails G2–G4
+### F2 — Guardrails G2–G4 ✅ (13-sept, + guardia de fechas sin validar y cambio de modelo ante 503)
 - Archivos: `apps/agent/src/voice/guardrails.ts` (nuevo), `turn.ts`, `tools.ts` (`registrar_desvio`, despedidas nuevas), `state.ts` (`offTopic`, `abuse`).
 - Aceptación: `npx tsx apps/agent/src/scripts/test-guardrails.ts` (unitario, sin red) pasa: inyección → plantilla; tarjeta dictada → enmascarada; frase con "embargo" → sustituida; 3 desvíos → fin con seguimiento.
 
-### F3 — ElevenLabs: voz femenina, primer mensaje del banco, resumen en español
+### F3 — ElevenLabs: voz femenina, primer mensaje del banco, resumen en español ✅ (voz Sarah provisional; falta `voices_read` para voz latina)
 - Primer mensaje: "{{saludo}}, mi nombre es Sofía, asistente digital de Bancoagrícola. ¿Tengo el gusto de hablar con {{nombre_completo}}?"; variable `saludo` calculada por hora de El Salvador en `dispatch.ts`.
 - Voz: femenina en español. **Requiere permiso `voices_read` en la API key** para elegir una voz latina de la biblioteca; mientras tanto, voz femenina multilingüe prediseñada.
 - Resumen: si llega en inglés, generar resumen en español con Gemini desde la transcripción en `finalize.ts`.
 - Aceptación: `GET /v1/convai/agents/{id}` muestra voz/primer mensaje nuevos; `summary` en español en la siguiente llamada.
 
-### F4 — Escenarios y evaluación
+### F4 — Escenarios y evaluación ✅ (ESC-REAL-01, ESC-FECHA-01, ESC-DESVIO-01, ESC-SENSIBLE-01 pasan)
 - `apps/agent/scenarios/ESC-REAL-01.json`, `ESC-DESVIO-01.json` (desvíos + inyección), `ESC-SENSIBLE-01.json` (dicta tarjeta).
 - Aceptación: los tres terminan con el resultado esperado en simulación.
 
-### F5 — BD (migración, la aplica el usuario)
+### F5 — BD (migración, la aplica el usuario) ✅ escrita y probada (`20260913000100_bank_script_results.sql`, 80 aserciones) · ⏳ aplicar en Supabase
 - `playbook_stages.instructions` con el guion del banco (sección 3); `assistant_name = 'Sofía, asistente digital de Bancoagrícola'`.
 - Mapeo de `outcome` → 3 resultados del banco (`result_category`: `AGREED_DATE | FOLLOW_UP | NO_AGREEMENT`) en vista para la web.
 - `npm run db:test` debe pasar.
 
-### F6 — Latencia y tiempo de marcado
+### F6 — Latencia y tiempo de marcado 🟡 (evento `call_dialing` con tiempos; timeout 5 s + cambio de modelo; falta activar facturación de Gemini)
 - Medir en `startRealCall`: `start_conversation`, precarga, respuesta de ElevenLabs `outbound-call`; objetivo < 5 s hasta que Twilio marca.
 - Reducir rondas de tools (validar + decir condiciones en 1 ronda cuando sea posible); p95 LLM < 1.5 s.
 
-### F7 — Web (enviado a @web)
+### F7 — Web ✅ (hecho por @web, sin commit)
 - Tarjeta **Promesa de pago**, transcripción limpia (tools como chips, UPDATE de mensajes), eventos agrupados, métricas < 2 s, 3 resultados del banco, línea de tiempo de reglas, KPIs de promesas.
+
+### Comandos de verificación (sin costo: no llaman por teléfono)
+```bash
+npx tsx apps/agent/src/scripts/test-guardrails.ts                         # unitario, sin red
+npx tsx apps/agent/src/scripts/test-cancel-turns.ts                       # turnos cancelados por ElevenLabs (HTTP, servidor :3000)
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-005 ESC-REAL-01      # usar clientes sin compromiso vigente
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-005 ESC-FECHA-01
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-007 ESC-DESVIO-01
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-002 ESC-SENSIBLE-01
+npx tsx apps/agent/src/scripts/cleanup-simulations.ts <ISO-desde>         # borra SOLO conversaciones simuladas desde esa hora
+npm run db:test                                                            # 80 aserciones SQL
+```
+Nota: las simulaciones escriben en Supabase (se ven en la web) y un compromiso simulado bloquea recontactar a ese cliente; limpiar al terminar.
 
 ### Checklist antes de la siguiente llamada real
 - [ ] F1–F4 verificadas en simulación

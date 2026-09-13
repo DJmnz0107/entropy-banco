@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 let total = 0, failed = false;
-for (const suite of ['flow.sql', 'prevention.sql']) {
+for (const suite of ['flow.sql', 'prevention.sql', 'bank.sql']) {
   const out = execFileSync('node', [path.join(here, 'run.mjs'), path.join(here, suite)], { encoding: 'utf8', maxBuffer: 1e8 });
   const fails = (out.match(/│ '❌' │/g) || []).length;
   const passes = (out.match(/│ '✅' │/g) || []).length;

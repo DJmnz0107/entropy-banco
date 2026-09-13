@@ -1,6 +1,6 @@
 {
   "key": "ESC-FECHA-01",
-  "customer_code": "DEMO-004",
+  "customer_code": "DEMO-005",
   "description": "Cliente que insiste en una fecha fuera del límite: el agente debe validar antes de afirmar cualquier fecha y proponer la máxima permitida.",
   "turns": [
     { "customer": "Sí, soy yo, dígame." },
