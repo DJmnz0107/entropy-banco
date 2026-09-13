@@ -8,16 +8,15 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@google/generative-ai": "latest",
-    "@supabase/supabase-js": "^2",
-    "hono": "^4",
+    "@elevenlabs/elevenlabs-js": "^2.68.0",
     "@hono/node-server": "^1",
+    "@supabase/supabase-js": "^2",
     "dotenv": "^16",
-    "ws": "^8"
+    "hono": "^4",
+    "openai": "^7.15.0"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/ws": "^8",
     "tsx": "^4",
     "typescript": "^5"
   }
