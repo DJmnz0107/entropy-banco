@@ -85,7 +85,7 @@ create table prevention_runs (
   expected_avoided_amount  numeric(14,2) not null default 0,
   dispatch_summary         jsonb,
   dispatched_at            timestamptz,
-  created_at               timestamptz not null default now()
+  created_at               timestamptz not null default clock_timestamp()   -- varias corridas en una transacción no empatan
 );
 
 alter table interventions
@@ -113,6 +113,14 @@ create table intervention_steps (
   unique (intervention_id, step)
 );
 create index on intervention_steps (customer_id, status);
+
+-- Política de canales de la corrida (editable desde la web)
+alter table agent_policies
+  add column channel_by_grade             jsonb   not null default '{"A":"email","B":"email","C":"voice","D":"voice","E":"voice"}',
+  add column email_fallback               boolean not null default true,   -- C–E que no contestan → correo
+  add column max_calls_per_run            int     not null default 5,      -- llamadas REALES por corrida (seguro de costo)
+  add column max_simulated_calls_per_run  int     not null default 3,      -- llamadas simuladas (sin ElevenLabs)
+  add column email_from                   text    not null default 'Bancoagrícola Demo <onboarding@resend.dev>';
 
 -- Handoff para enviar videos; rol "telephony" para costear llamadas
 alter table handoffs drop constraint if exists handoffs_action_check;
@@ -277,6 +285,8 @@ declare
   v_prio    numeric;
   v_block   text;
   v_negotiate boolean := false;
+  v_pol     agent_policies := active_policy();
+  v_policy_ch text;
   v_sv      numeric;
   v_sw      numeric;
 begin
@@ -317,47 +327,52 @@ begin
   elsif prof.last_outcome in ('HUMAN_ESCALATION','EXPLICIT_REFUSAL') and prof.last_contact_at > now() - interval '30 days' then
     v_action := 'HUMAN'; v_channel := 'human';
     v_why := v_why || to_jsonb(format('Última interacción terminó en %s: mejor atención humana', prof.last_outcome));
-  elsif v_grade in ('A','B') then
-    if jsonb_array_length(m->'matched_rules') = 0 and edu is null then
-      v_action := 'MONITOR';
-    else
-      v_action := 'EDUCATION_REMINDER'; v_channel := 'whatsapp';
-    end if;
-  elsif v_grade = 'E' and coalesce(jnum(prop->'voice'->'response'), 0) < 0.3 then
-    v_action := 'HUMAN'; v_channel := 'human';
+  elsif v_grade in ('A','B') and jsonb_array_length(m->'matched_rules') = 0 and edu is null then
+    v_action := 'MONITOR';
   else
-    -- C, D, E: canal con mayor éxito esperado entre los permitidos por las reglas, ajustado por
-    --   · preferencia declarada del cliente (+15%)
-    --   · necesidad de negociar (plan / extensión / parcial con historial de atrasos o señales): la voz +20%
+    -- Política de canal por grado (agent_policies.channel_by_grade, editable desde la web):
+    --   'voice' = llama el agente · 'email' = correo · 'whatsapp' · 'auto' = canal con mayor éxito esperado
+    v_policy_ch := coalesce(v_pol.channel_by_grade ->> v_grade, case when v_grade in ('A','B') then 'email' else 'voice' end);
     v_negotiate := exists (select 1 from jsonb_array_elements(m->'offers') o
                             where o->>'offer_type' in ('DATE_EXTENSION','INSTALLMENT_PLAN','PARTIAL_PAYMENT'))
                    and (coalesce(jnum(f->'late_payments_12m'), 0) >= 2 or jsonb_array_length(f->'signals') > 0);
-    v_sv := coalesce(jnum(prop->'voice'->'success'), 0)
-            * (case when c.preferred_channel = 'voice' then 1.15 else 1 end)
-            * (case when v_negotiate then 1.20 else 1 end);
-    v_sw := coalesce(jnum(prop->'whatsapp'->'success'), 0)
-            * (case when c.preferred_channel = 'whatsapp' then 1.15 else 1 end);
-    if v_sv >= v_sw and ('voice' = any(v_chseq) or cardinality(v_chseq) = 0) and c.consent_voice then
-      v_channel := 'voice';
-    elsif c.consent_whatsapp then
-      v_channel := 'whatsapp';
+
+    if v_policy_ch = 'auto' then
+      --   · preferencia declarada del cliente (+15%)
+      --   · necesidad de negociar (plan / extensión / parcial con atrasos o señales): la voz +20%
+      v_sv := coalesce(jnum(prop->'voice'->'success'), 0)
+              * (case when c.preferred_channel = 'voice' then 1.15 else 1 end)
+              * (case when v_negotiate then 1.20 else 1 end);
+      v_sw := coalesce(jnum(prop->'whatsapp'->'success'), 0)
+              * (case when c.preferred_channel = 'whatsapp' then 1.15 else 1 end);
+      v_channel := case when v_sv >= v_sw and ('voice' = any(v_chseq) or cardinality(v_chseq) = 0) then 'voice' else 'whatsapp' end;
     else
-      v_channel := 'voice';
+      v_channel := v_policy_ch;
     end if;
 
-    if v_channel = 'voice' then
-      v_action := case when v_negotiate then 'CALL_ALTERNATIVE_DATE' else 'CALL_NOW' end;
-    else
-      v_action := 'WHATSAPP';
-    end if;
+    -- consentimiento: si no puede por ese canal, correo; si tampoco, no se contacta
+    if v_channel = 'voice' and not c.consent_voice then v_channel := 'email'; end if;
+    if v_channel = 'whatsapp' and not c.consent_whatsapp then v_channel := 'email'; end if;
+    if v_channel = 'email' and not c.consent_email then v_channel := null; end if;
+
+    v_action := case v_channel
+      when 'voice'    then case when v_negotiate then 'CALL_ALTERNATIVE_DATE' else 'CALL_NOW' end
+      when 'whatsapp' then 'WHATSAPP'
+      when 'email'    then 'EMAIL_REMINDER'
+      else 'MONITOR' end;
+    if v_channel is null then v_block := 'Sin consentimiento para ningún canal'; end if;
   end if;
 
-  if v_channel in ('voice','whatsapp') then
-    v_whych := format('Contesta %s de %s llamadas y %s de %s WhatsApp. Éxito estimado por su grado: voz %s%%, WhatsApp %s%%.',
-      prop->'voice'->>'responses', prop->'voice'->>'attempts', prop->'whatsapp'->>'responses', prop->'whatsapp'->>'attempts',
-      round(100 * jnum(prop->'voice'->'success')), round(100 * jnum(prop->'whatsapp'->'success')))
-      || case when c.preferred_channel in ('voice','whatsapp') then ' Prefiere ' || case c.preferred_channel when 'voice' then 'llamada.' else 'WhatsApp.' end else '' end
-      || case when v_negotiate then ' Necesita negociar una alternativa: la voz funciona mejor.' else '' end;
+  if v_channel in ('voice','whatsapp','email') then
+    v_whych := case when v_policy_ch in ('voice','email','whatsapp')
+                    then format('Política de la corrida: grado %s → %s. ', v_grade,
+                                case v_policy_ch when 'voice' then 'llamada del agente' when 'email' then 'correo' else 'WhatsApp' end)
+                    else '' end
+      || format('Historial: contesta %s de %s llamadas. Éxito estimado por su grado: voz %s%%, WhatsApp %s%%.',
+           prop->'voice'->>'responses', prop->'voice'->>'attempts',
+           round(100 * jnum(prop->'voice'->'success')), round(100 * jnum(prop->'whatsapp'->'success')))
+      || case when v_negotiate and v_channel = 'voice' then ' Necesita negociar una alternativa.' else '' end
+      || case when v_channel = 'voice' and coalesce(v_pol.email_fallback, true) then ' Si no contesta, recibe un correo.' else '' end;
   end if;
 
   v_top := v_offers->0->>'name';
@@ -365,20 +380,26 @@ begin
   -- Plan
   v_plan := case v_action
     when 'CALL_NOW' then jsonb_build_array(
-      jsonb_build_object('step',1,'type','CALL','label','Llamada preventiva'),
-      jsonb_build_object('step',2,'type','UNDERSTAND','label','Identificar su situación'),
-      jsonb_build_object('step',3,'type','COMMITMENT','label','Conseguir compromiso de pago'),
-      jsonb_build_object('step',4,'type','WHATSAPP','label','Enviar resumen y link por WhatsApp'),
-      jsonb_build_object('step',5,'type','EDUCATION','label', coalesce('Enviar video: ' || (edu->>'title'), 'Enviar video de educación financiera')),
-      jsonb_build_object('step',6,'type','FOLLOW_UP','label','Recordatorio antes de la fecha acordada'))
-    when 'CALL_ALTERNATIVE_DATE' then jsonb_build_array(
-      jsonb_build_object('step',1,'type','CALL','label','Llamada preventiva'),
-      jsonb_build_object('step',2,'type','UNDERSTAND','label','Identificar su situación'),
-      jsonb_build_object('step',3,'type','OFFER','label', coalesce('Ofrecer alternativa autorizada: ' || v_top, 'Ofrecer alternativa autorizada')),
-      jsonb_build_object('step',4,'type','COMMITMENT','label','Conseguir compromiso concreto'),
-      jsonb_build_object('step',5,'type','WHATSAPP','label','Continuar por WhatsApp con resumen y link'),
+      jsonb_build_object('step',1,'type','CALL','label','Llamada preventiva del agente'),
+      jsonb_build_object('step',2,'type','EMAIL','label','Si no contesta: correo de seguimiento'),
+      jsonb_build_object('step',3,'type','UNDERSTAND','label','Identificar su situación'),
+      jsonb_build_object('step',4,'type','COMMITMENT','label','Conseguir compromiso de pago'),
+      jsonb_build_object('step',5,'type','CONFIRMATION','label','Enviar confirmación y link de pago por correo'),
       jsonb_build_object('step',6,'type','EDUCATION','label', coalesce('Enviar video: ' || (edu->>'title'), 'Enviar video de educación financiera')),
       jsonb_build_object('step',7,'type','FOLLOW_UP','label','Recordatorio antes de la fecha acordada'))
+    when 'CALL_ALTERNATIVE_DATE' then jsonb_build_array(
+      jsonb_build_object('step',1,'type','CALL','label','Llamada preventiva del agente'),
+      jsonb_build_object('step',2,'type','EMAIL','label','Si no contesta: correo de seguimiento'),
+      jsonb_build_object('step',3,'type','UNDERSTAND','label','Identificar su situación'),
+      jsonb_build_object('step',4,'type','OFFER','label', coalesce('Ofrecer alternativa autorizada: ' || v_top, 'Ofrecer alternativa autorizada')),
+      jsonb_build_object('step',5,'type','COMMITMENT','label','Conseguir compromiso concreto'),
+      jsonb_build_object('step',6,'type','CONFIRMATION','label','Enviar confirmación y link de pago por correo'),
+      jsonb_build_object('step',7,'type','EDUCATION','label', coalesce('Enviar video: ' || (edu->>'title'), 'Enviar video de educación financiera')),
+      jsonb_build_object('step',8,'type','FOLLOW_UP','label','Recordatorio antes de la fecha acordada'))
+    when 'EMAIL_REMINDER' then jsonb_build_array(
+      jsonb_build_object('step',1,'type','EMAIL','label','Correo preventivo con recordatorio y opciones'),
+      jsonb_build_object('step',2,'type','EDUCATION','label', coalesce('Video incluido en el correo: ' || (edu->>'title'), 'Video de educación financiera en el correo')),
+      jsonb_build_object('step',3,'type','FOLLOW_UP','label','Verificar el pago en la fecha de vencimiento'))
     when 'WHATSAPP' then jsonb_build_array(
       jsonb_build_object('step',1,'type','WHATSAPP','label','Mensaje preventivo con opciones'),
       jsonb_build_object('step',2,'type','COMMITMENT','label','Conseguir compromiso de pago'),
@@ -394,6 +415,7 @@ begin
 
   v_succ := case v_channel when 'voice' then jnum(prop->'voice'->'success')
                            when 'whatsapp' then jnum(prop->'whatsapp'->'success')
+                           when 'email' then 0.30   -- sin historial de correo: supuesto conservador, etiquetado como estimación
                            when 'human' then 0.5 else 0 end;
   v_prio := round(coalesce(ra.score, 0) * (1 + least(v_amount, 1000) / 1000.0)
                   * (case when coalesce(jnum(f->'days_to_due'), 99) between -15 and 7 then 1.3 else 1 end));
@@ -440,15 +462,20 @@ end $$;
 
 create or replace function trg_plan_from_conversation() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare
+  v_step text;
 begin
   if new.intervention_id is null then return new; end if;
+  v_step := case new.channel when 'voice' then 'CALL' when 'email' then 'EMAIL' else 'WHATSAPP' end;
   if tg_op = 'INSERT' then
-    perform sync_plan_step(new.intervention_id, case when new.channel = 'voice' then 'CALL' else 'WHATSAPP' end,
-                           'in_progress', new.id);
+    perform sync_plan_step(new.intervention_id, v_step, 'in_progress', new.id);
   elsif new.status <> old.status and new.status in ('completed','no_answer','failed') then
-    perform sync_plan_step(new.intervention_id, case when new.channel = 'voice' then 'CALL' else 'WHATSAPP' end,
+    perform sync_plan_step(new.intervention_id, v_step,
                            case when new.status = 'completed' then 'done' else 'failed' end, new.id,
                            jsonb_build_object('outcome', new.outcome));
+    if new.channel = 'voice' and new.status = 'completed' and new.turn_count > 0 then
+      perform sync_plan_step(new.intervention_id, 'EMAIL', 'skipped', new.id, '{"reason":"Contestó la llamada"}');
+    end if;
     if new.turn_count > 0 then
       perform sync_plan_step(new.intervention_id, 'UNDERSTAND', 'done', new.id,
                              jsonb_build_object('intent', new.final_intent, 'sentiment', new.sentiment_end));
@@ -587,14 +614,26 @@ create or replace function get_prevention_run(p_run_id uuid, p_channel text defa
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
     'run', to_jsonb(r),
+    'policy', (select jsonb_build_object('channel_by_grade', channel_by_grade, 'email_fallback', email_fallback,
+                                         'max_calls_per_run', max_calls_per_run,
+                                         'max_simulated_calls_per_run', max_simulated_calls_per_run, 'email_from', email_from)
+                 from agent_policies where is_active limit 1),
     'interventions', coalesce((
       select jsonb_agg(jsonb_build_object(
         'intervention_id', i.id, 'customer_id', i.customer_id, 'customer_code', c.customer_code, 'full_name', c.full_name,
-        'first_name', c.first_name, 'phone_e164', c.phone_e164, 'contact_enabled', c.contact_enabled,
+        'first_name', c.first_name, 'phone_e164', c.phone_e164, 'email', c.email, 'contact_enabled', c.contact_enabled,
         'grade', i.grade, 'action', i.action, 'channel', i.recommended_channel, 'status', i.status,
-        'priority', i.priority, 'amount_at_risk', i.amount_at_risk)
+        'priority', i.priority, 'amount_at_risk', i.amount_at_risk,
+        'amount_due_text', fmt_money(i.amount_at_risk), 'due_date', nx.due_date, 'due_date_text', fmt_date_es(nx.due_date),
+        'product_name', nx.product_name, 'why', i.next_best->'why', 'offers', i.next_best->'offers',
+        'education', i.next_best->'education', 'playbook_key', i.playbook_key)
         order by i.priority desc)
-        from interventions i join customers c on c.id = i.customer_id
+        from interventions i
+        join customers c on c.id = i.customer_id
+        left join lateral (
+          select ins.due_date, l.product_name from loans l
+            join installments ins on ins.loan_id = l.id and ins.status in ('pending','partial','overdue')
+           where l.id = i.loan_id order by ins.due_date limit 1) nx on true
        where i.prevention_run_id = r.id and i.status = 'scheduled'
          and (p_channel is null or i.recommended_channel = p_channel)), '[]'))
   from prevention_runs r where r.id = p_run_id
@@ -607,7 +646,7 @@ $$;
 
 -- ─── Enviar video ──────────────────────────────────────────────────────────
 create or replace function send_education(p_customer_id uuid, p_conversation_id uuid default null, p_slug text default null,
-                                          p_reason text default null)
+                                          p_reason text default null, p_channel text default 'whatsapp')
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   e       education_contents;
@@ -629,9 +668,16 @@ begin
                    (select id from interventions where customer_id = p_customer_id and status in ('scheduled','dispatched','completed')
                      and not is_synthetic order by created_at desc limit 1));
 
-  insert into education_deliveries (customer_id, content_id, conversation_id, intervention_id, reason)
-  values (p_customer_id, e.id, p_conversation_id, v_iv, p_reason) returning id into v_id;
+  insert into education_deliveries (customer_id, content_id, conversation_id, intervention_id, reason, channel)
+  values (p_customer_id, e.id, p_conversation_id, v_iv, p_reason, p_channel) returning id into v_id;
   v_url := v_base || e.slug || '?d=' || v_id;
+
+  -- por correo lo envía el servidor en el mismo mensaje: queda como enviado
+  if p_channel = 'email' then
+    update education_deliveries set url = v_url, status = 'sent', sent_at = now() where id = v_id;
+    return jsonb_build_object('ok', true, 'delivery_id', v_id, 'slug', e.slug, 'title', e.title, 'url', v_url,
+                              'duration_s', e.duration_s, 'channel', 'email');
+  end if;
   update education_deliveries set url = v_url where id = v_id;
 
   insert into handoffs (customer_id, from_conversation_id, from_channel, to_channel, action, payload, context_summary)
@@ -743,7 +789,11 @@ begin
    $t$Uno: paga antes de la fecha. Dos: usa recordatorios. Tres: si algo cambia, avísanos a tiempo. Así tu buen historial sigue creciendo.$t$,
    '{"any":[{"fact":"risk_band","op":"in","value":["BAJO","MODERADO"]},{"fact":"kept_commitments_6m","op":"gte","value":1}]}', 40);
 
-  delete from ai_model_profiles where key in ('voice.elevenlabs', 'telephony.twilio-sv-mobile');
+  insert into outcome_definitions (code, label, category, counts_as_contact, counts_as_commitment, description, sort_order)
+  values ('MESSAGE_SENT', 'Mensaje enviado', 'neutral', false, false, 'Correo o mensaje enviado; sin conversación.', 17)
+  on conflict (code) do nothing;
+
+  delete from ai_model_profiles where key in ('voice.elevenlabs', 'telephony.twilio-sv-mobile', 'email.resend');
   insert into ai_model_profiles (key, role, provider, model_id, display_name, modality, params, vad_config, pricing, capabilities,
                                  pricing_source_url, pricing_verified_at, status, notes) values
   ('voice.elevenlabs', 'voice_realtime', 'elevenlabs', 'elevenlabs-agents', 'ElevenLabs Agents + Custom LLM', 'realtime_audio',
@@ -754,7 +804,10 @@ begin
    $t$Voz, STT, turnos, interrupciones y telefonía. El LLM es nuestro servidor (/v1/chat/completions).$t$),
   ('telephony.twilio-sv-mobile', 'telephony', 'twilio', 'voice-outbound-sv-mobile', 'Twilio saliente a celular SV', 'telephony',
    '{}', '{}', '{"audio_in_per_min":0.29}', '{}', 'https://www.twilio.com/en-us/voice/pricing/sv', '2026-09-12', 'active',
-   $t$Costo por minuto de llamada saliente a celular de El Salvador.$t$);
+   $t$Costo por minuto de llamada saliente a celular de El Salvador.$t$),
+  ('email.resend', 'telephony', 'resend', 'resend-email', 'Resend (correo)', 'telephony', '{}', '{}', '{}', '{}',
+   'https://resend.com/pricing', null, 'unverified',
+   $t$Correo transaccional. Sin dominio verificado solo permite enviar al correo del dueño de la cuenta (usar onboarding@resend.dev).$t$);
 
   update agent_policies set default_models = default_models || '{"voice_mode":"elevenlabs","voice_realtime":"voice.elevenlabs"}'
    where is_active;
@@ -840,6 +893,135 @@ begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     alter publication supabase_realtime add table prevention_runs, intervention_steps, education_deliveries;
   end if;
+end $$;
+
+revoke execute on all functions in schema public from public, anon;
+grant execute on all functions in schema public to authenticated, service_role;
+grant execute on function get_payment_link(text) to anon;
+grant execute on function simulate_payment(text, text) to anon;
+grant execute on function get_education_content(text, uuid) to anon;
+
+-- ─── start_conversation: correo protegido + modo simulación ────────────────
+-- Cambios vs 0700: (1) el correo también exige contact_enabled en vivo; (2) si la sesión marca
+-- app.simulation = on (solo desde start_simulated_conversation) no se exige contact_enabled.
+create or replace function start_conversation(
+  p_customer_id            uuid,
+  p_channel                text,
+  p_direction              text    default 'outbound',
+  p_external_id            text    default null,
+  p_parent_conversation_id uuid    default null,
+  p_intervention_id        uuid    default null,
+  p_experiment_key         text    default null,
+  p_force                  boolean default false
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  c         customers;
+  pol       agent_policies := active_policy();
+  v_ctx     jsonb;
+  v_arm     jsonb;
+  v_models  jsonb;
+  v_pb      playbooks;
+  v_first   text;
+  v_iv      uuid;
+  v_conv    uuid;
+  v_warn    jsonb := '[]';
+  v_prompts jsonb;
+  v_sim     boolean := coalesce(current_setting('app.simulation', true), '') = 'on';
+begin
+  select * into c from customers where id = p_customer_id;
+  if c.id is null then raise exception 'CLIENTE_NO_EXISTE: %', p_customer_id; end if;
+
+  if p_direction = 'outbound' then
+    if pol.live_contact_allowlist_only and p_channel in ('voice','whatsapp','sms','email') and not c.contact_enabled and not v_sim then
+      raise exception 'CONTACTO_NO_HABILITADO: % no tiene contact_enabled. Ejecuta set_demo_contact(''%'', ''+503...'').',
+        c.customer_code, c.customer_code;
+    end if;
+    if c.opted_out_at is not null then
+      raise exception 'CLIENTE_PIDIO_NO_SER_CONTACTADO: %', c.customer_code;
+    end if;
+    if c.is_control_group and not p_force then
+      raise exception 'GRUPO_DE_CONTROL: % no se contacta (contrafactual). Usa p_force => true solo para pruebas.', c.customer_code;
+    end if;
+    if (p_channel = 'voice' and not c.consent_voice) or (p_channel = 'whatsapp' and not c.consent_whatsapp)
+       or (p_channel = 'email' and not c.consent_email) then
+      raise exception 'SIN_CONSENTIMIENTO_PARA_CANAL: %', p_channel;
+    end if;
+  end if;
+
+  v_ctx := get_conversation_context(p_customer_id);
+
+  if p_direction = 'outbound' and (v_ctx->'rules'->>'blocked')::boolean and not p_force then
+    raise exception 'CONTACTO_BLOQUEADO_POR_REGLA: %', v_ctx->'rules'->'block_reasons';
+  end if;
+
+  if next_contact_slot() > now() + interval '1 minute' then
+    v_warn := v_warn || jsonb_build_array('FUERA_DE_HORARIO_DE_CONTACTO');
+  end if;
+
+  if p_experiment_key is not null then
+    v_arm := pick_experiment_arm(p_experiment_key, p_customer_id::text);
+  end if;
+  v_models := resolve_models(v_arm);
+
+  select jsonb_object_agg(key, version) into v_prompts from prompt_versions where is_active;
+  if v_arm ? 'prompt_overrides' then v_prompts := coalesce(v_prompts, '{}') || (v_arm->'prompt_overrides'); end if;
+
+  select * into v_pb from playbooks where key = v_ctx->'playbook'->>'key';
+  select stage_key into v_first from playbook_stages
+   where playbook_id = v_pb.id and not is_terminal order by position limit 1;
+
+  v_iv := coalesce(p_intervention_id,
+                   (select id from interventions where customer_id = p_customer_id and status = 'scheduled'
+                     order by created_at desc limit 1));
+
+  insert into conversations (customer_id, loan_id, intervention_id, parent_conversation_id, channel, direction,
+                             external_id, playbook_id, playbook_key, current_stage, matched_rules, allowed_offers,
+                             constraints, tone, context_snapshot, risk_before, experiment_id, arm_key, models,
+                             prompt_versions, is_synthetic)
+  values (p_customer_id, nullif(v_ctx->'loan'->>'id','')::uuid, v_iv, p_parent_conversation_id, p_channel, p_direction,
+          p_external_id, v_pb.id, v_pb.key, v_first, v_ctx->'rules'->'matched', v_ctx->'offers',
+          v_ctx->'constraints', v_ctx->'rules'->>'tone', v_ctx, jnum(v_ctx->'risk'->'score'),
+          nullif(v_arm->>'experiment_id','')::uuid, v_arm->>'arm_key', v_models, coalesce(v_prompts, '{}'), v_sim)
+  returning id into v_conv;
+
+  if v_iv is not null then
+    update interventions set status = 'dispatched', dispatched_at = now(), conversation_id = v_conv where id = v_iv;
+  end if;
+
+  perform log_event(v_conv, 'conversation_started', jsonb_build_object(
+    'channel', p_channel, 'direction', p_direction, 'playbook', v_pb.key, 'first_stage', v_first, 'simulated', v_sim,
+    'rules', v_ctx->'rules'->'matched', 'offers', (select jsonb_agg(o->>'code') from jsonb_array_elements(v_ctx->'offers') o),
+    'models', v_models, 'arm', v_arm->>'arm_key', 'warnings', v_warn));
+
+  return jsonb_build_object(
+    'conversation_id', v_conv,
+    'current_stage',   v_first,
+    'simulated',       v_sim,
+    'models',          v_models,
+    'prompt_versions', coalesce(v_prompts, '{}'),
+    'experiment',      v_arm,
+    'warnings',        v_warn,
+    'context',         v_ctx);
+end $$;
+
+-- Conversación simulada (sin teléfono/correo real): respeta reglas, bloqueos y grupo de control,
+-- pero no exige contact_enabled. Queda marcada is_synthetic = true.
+create or replace function start_simulated_conversation(p_customer_id uuid, p_channel text, p_intervention_id uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_res jsonb;
+begin
+  perform set_config('app.simulation', 'on', true);
+  begin
+    v_res := start_conversation(p_customer_id, p_channel, 'outbound', 'sim-' || substr(gen_random_uuid()::text, 1, 8),
+                                null, p_intervention_id);
+  exception when others then
+    perform set_config('app.simulation', 'off', true);   -- nunca dejar la bandera encendida
+    raise;
+  end;
+  perform set_config('app.simulation', 'off', true);
+  return v_res;
 end $$;
 
 revoke execute on all functions in schema public from public, anon;
