@@ -18,6 +18,7 @@ Documentos:
 - `docs/CONTRATO-API.md` — **contrato RPC** entre voz, WhatsApp y web. Leer antes de integrar.
 - `docs/WEB-CENTRO-PREVENCION.md` — paso a paso de la web (Centro de Prevención, en vivo, impacto, configuración).
 - `docs/AGENTE-VOZ-ELEVENLABS.md` — agente de voz implementado: arquitectura, variables, configuración de ElevenLabs y pruebas.
+- `docs/REGLAS-AGENTE-VOZ.md` — **reglas v2 del agente** (guion del banco, negociación, cierre, tema, seguridad, guardrails), hallazgos de la 1ª llamada real y fases.
 - Migración 1200 (Motor de Prevención): `next_best_intervention`, `run_prevention`, `get_prevention_run`,
   `start_simulated_conversation`, `send_education`, `v_prevention_center`, `v_customer_financial_profile`,
   `intervention_steps`, `education_contents`, `v_impact`, `v_learning`.
@@ -36,6 +37,8 @@ Documentos:
 | Modelos Gemini | `gemini-3.1-flash-lite` (cerebro, supervisor, cliente simulado). `gemini-2.5-flash-lite` NO disponible para cuentas nuevas |
 | Supervisor / WhatsApp | Gemini Flash-Lite (endpoint compatible OpenAI) |
 | Demo de voz | **Llamada telefónica real**: ElevenLabs + número de EE. UU. en Twilio → celular de El Salvador (~$0.29/min Twilio + minutos de ElevenLabs). WhatsApp de Meta no sirve para llamadas (número de prueba, sin calling). Setup: `npx tsx apps/agent/src/scripts/setup-twilio-voice.ts` |
+| Persona y guardrails | **Sofía**, asistente digital (voz femenina). Prompt v2 con el *Script de Referencia* del banco; guardrails deterministas en `apps/agent/src/voice/guardrails.ts` (inyección, datos sensibles, agresión, fuera de tema 1-2-3, amenazas, promesas no autorizadas, fechas sin validar). Ver `docs/REGLAS-AGENTE-VOZ.md` |
+| Resultado de cada llamada | 3 salidas del banco: FECHA_ACORDADA · SEGUIMIENTO · SIN_ACUERDO (`v_conversation_results`) |
 | Datos | 100% ficticios, seed determinista, fechas relativas a hoy (America/El_Salvador) |
 
 Reemplaza decisiones anteriores (OpenAI, Vapi, backend TS `packages/core`): la lógica compartida está en SQL
@@ -63,7 +66,8 @@ supabase/
     …1000_seed_config.sql        seed_config(): ofertas, reglas, playbooks, criterios, modelos, prompts, experimentos
     …1100_seed_data.sql          seed_personas(), seed_customers(), seed_history(), reset_demo()
   seed.sql                       select reset_demo();
-  tests/                         runner PGlite (Postgres en WASM, sin Docker) + flow.sql (38 aserciones)
+    …1300 (20260913000100)        apply_bank_script(), reset_demo() con guion del banco, v_conversation_results
+  tests/                         runner PGlite (Postgres en WASM, sin Docker) + flow.sql, prevention.sql, bank.sql (80 aserciones)
 scripts/db-push.sh               prueba local → dry-run → push a Supabase
 docs/
 ```
@@ -72,12 +76,15 @@ docs/
 
 ```bash
 npm install
-npm run db:test      # migraciones + seed + 38 aserciones del flujo de control en Postgres local (PGlite)
+npm run db:test      # migraciones + seed + 80 aserciones (flujo, prevención, guion del banco) en Postgres local (PGlite)
 npm run db:metrics   # KPIs, distribución de riesgo, personajes, impacto
 npm run db:push      # requiere SUPABASE_DB_URL en .env; corre db:test antes
 npm run agent:dev    # servidor del agente :3000 (GET /health muestra proveedores activos)
 npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-001 ESC-C    # llamada simulada (Supabase + Gemini reales)
 npx tsx apps/agent/src/scripts/test-custom-llm.ts DEMO-003        # endpoint Custom LLM como lo llama ElevenLabs
+npx tsx apps/agent/src/scripts/test-guardrails.ts                 # guardrails (sin red)
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-005 ESC-REAL-01   # regresión de la 1ª llamada real (con criterios)
+npx tsx apps/agent/src/scripts/cleanup-simulations.ts <ISO-desde>      # borra solo conversaciones simuladas
 ```
 
 SQL útil:
