@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:03,857
+Pagar tarde no solo suma recargos:
+
+2
+00:00:03,857 --> 00:00:06,428
+también afecta tu récord.
+
+3
+00:00:06,428 --> 00:00:18,000
+Programa un recordatorio dos días antes de tu fecha y, si no te alcanza, llámanos antes del vencimiento.

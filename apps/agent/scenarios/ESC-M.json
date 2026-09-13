@@ -1,0 +1,16 @@
+{
+  "key": "ESC-M",
+  "customer_code": "DEMO-012",
+  "description": "Llamada con silencios prolongados o cortada; tras reprompts el agente cierra y deriva a WhatsApp.",
+  "turns": [
+    { "customer": "Aló..." },
+    { "customer": "" },
+    { "customer": "" },
+    { "customer": "" }
+  ],
+  "expect": {
+    "outcome_in": ["ABANDONED"],
+    "must_reach_stages": ["APERTURA"],
+    "must_not_say": ["embargo", "demanda", "lista negra"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "key": "ESC-I",
+  "customer_code": "DEMO-003",
+  "description": "Cliente que emite asentimientos breves (ajá, mjm) mientras el agente habla sin intención de interrumpir.",
+  "turns": [
+    { "customer": "Aló, sí, dígame." },
+    { "customer": "Ajá, sí.", "interrupt_previous_agent_at": 0.6 },
+    { "customer": "Mjm, lo escucho.", "interrupt_previous_agent_at": 0.5 },
+    { "customer": "Cabal, el viernes 18 tengo previsto hacer la transferencia." },
+    { "customer": "Sí, totalmente de acuerdo, regístrelo para esa fecha." },
+    { "customer": "Va perfecto, muchas gracias por el recordatorio." }
+  ],
+  "expect": {
+    "outcome_in": ["PAYMENT_COMMITMENT"],
+    "must_reach_stages": ["CONTEXTO", "PROPUESTA", "CONFIRMACION"],
+    "must_not_say": ["embargo", "demanda", "lista negra"]
+  }
+}

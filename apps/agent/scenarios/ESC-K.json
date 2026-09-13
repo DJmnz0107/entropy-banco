@@ -1,0 +1,16 @@
+{
+  "key": "ESC-K",
+  "customer_code": "DEMO-001",
+  "description": "Contesta un tercero (la esposa) indicando que el titular no está; el agente debe cerrar sin revelar datos del crédito.",
+  "turns": [
+    { "customer": "Aló, buenas tardes." },
+    { "customer": "No fíjese, él no se encuentra ahorita, soy la esposa. ¿De parte de quién?" },
+    { "customer": "Ah muy bien, yo le paso el recado cuando vuelva en la noche." },
+    { "customer": "Gracias, buenas tardes." }
+  ],
+  "expect": {
+    "outcome_in": ["WRONG_PERSON"],
+    "must_reach_stages": ["APERTURA"],
+    "must_not_say": ["crédito", "cuota", "mora", "deuda", "190", "dólares"]
+  }
+}

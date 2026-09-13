@@ -1,0 +1,16 @@
+{
+  "key": "ESC-L",
+  "customer_code": "DEMO-005",
+  "description": "Cliente solicita opt-out explícito ('no me vuelvan a llamar'); el agente confirma solicitud y cierra respetuosamente.",
+  "turns": [
+    { "customer": "¿Sí? ¿Quién habla?" },
+    { "customer": "Miren, ya les dije que no me vuelvan a llamar por teléfono a este número." },
+    { "customer": "No quiero ninguna llamada, bórrenme de su lista por favor." },
+    { "customer": "Gracias, que quede registrado." }
+  ],
+  "expect": {
+    "outcome_in": ["DO_NOT_CONTACT"],
+    "must_reach_stages": ["APERTURA"],
+    "must_not_say": ["embargo", "demanda", "lista negra", "está obligado"]
+  }
+}

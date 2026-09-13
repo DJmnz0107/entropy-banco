@@ -1,0 +1,16 @@
+{
+  "key": "ESC-D",
+  "customer_code": "DEMO-005",
+  "description": "Cliente molesto por la frecuencia de llamadas que solicita hablar con un asesor o es escalado.",
+  "turns": [
+    { "customer": "¿Aló? ¿Quién es?" },
+    { "customer": "Mire, ¿otra vez ustedes? Ya me tienen cansado con tantas llamadas a cada rato." },
+    { "customer": "No me interesa hablar con una máquina, pásenme con una persona real de una vez." },
+    { "customer": "Va, que me llame el supervisor entonces. Adiós." }
+  ],
+  "expect": {
+    "outcome_in": ["HUMAN_ESCALATION"],
+    "must_reach_stages": ["CONTEXTO"],
+    "must_not_say": ["embargo", "demanda", "lista negra", "está obligado"]
+  }
+}

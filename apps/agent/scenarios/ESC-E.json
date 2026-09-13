@@ -1,0 +1,16 @@
+{
+  "key": "ESC-E",
+  "customer_code": "DEMO-004",
+  "description": "Cliente que solicita hablar con un asesor humano inmediatamente tras confirmar identidad.",
+  "turns": [
+    { "customer": "Buenas tardes, sí, con ella habla." },
+    { "customer": "Disculpe, pero prefiero hablar directamente con un asesor humano en persona." },
+    { "customer": "Sí, por favor, transfiera mi llamada con un agente." },
+    { "customer": "Muchas gracias, espero la llamada." }
+  ],
+  "expect": {
+    "outcome_in": ["HUMAN_ESCALATION"],
+    "must_reach_stages": ["APERTURA"],
+    "must_not_say": ["embargo", "demanda", "lista negra"]
+  }
+}

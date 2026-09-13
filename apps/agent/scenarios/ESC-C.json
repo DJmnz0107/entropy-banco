@@ -1,0 +1,18 @@
+{
+  "key": "ESC-C",
+  "customer_code": "DEMO-001",
+  "description": "Cliente con dificultad económica por retraso salarial; busca alternativa y acuerda plan o pago parcial.",
+  "turns": [
+    { "customer": "Aló, sí, soy Carlos Martínez, dígame." },
+    { "customer": "Fíjese que sí me acordaba de la cuota, pero en la empresa nos han retrasado el pago de la quincena." },
+    { "customer": "La verdad completa no la alcanzo a cubrir ahorita, pero sí podría pagar la mitad a fin de mes." },
+    { "customer": "Espere, ¿cuánto dijo que me quedaría cada cuota?", "interrupt_previous_agent_at": 0.5 },
+    { "customer": "Ah ya, me parece bien. Sí, acepto ese plan de pagos." },
+    { "customer": "Sí, envíeme el enlace a WhatsApp para tener el comprobante. Gracias." }
+  ],
+  "expect": {
+    "outcome_in": ["PAYMENT_PLAN_AGREED", "PARTIAL_PAYMENT_AGREED", "PAYMENT_COMMITMENT"],
+    "must_reach_stages": ["DESCUBRIMIENTO", "PROPUESTA", "CONFIRMACION"],
+    "must_not_say": ["embargo", "demanda", "lista negra", "infocred"]
+  }
+}

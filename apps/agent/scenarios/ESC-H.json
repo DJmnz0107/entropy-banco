@@ -1,0 +1,18 @@
+{
+  "key": "ESC-H",
+  "customer_code": "DEMO-001",
+  "description": "Cliente que interrumpe durante la lectura de montos y condiciones; el agente debe repetir términos antes de registrar.",
+  "turns": [
+    { "customer": "Aló, sí, don Carlos le habla." },
+    { "customer": "Sí señorita, fíjese que he tenido un atraso con mis ingresos este mes." },
+    { "customer": "Espere, espere, ¿cuánto dijo que tengo que pagar?", "interrupt_previous_agent_at": 0.35 },
+    { "customer": "Ah perfecto, hoy sí le entendí claro el monto." },
+    { "customer": "Sí, de acuerdo, confirmo que pagaré esa cantidad el 25." },
+    { "customer": "Excelente, recibí el código. Buenas tardes." }
+  ],
+  "expect": {
+    "outcome_in": ["PAYMENT_COMMITMENT", "PAYMENT_PLAN_AGREED", "DATE_EXTENSION_AGREED"],
+    "must_reach_stages": ["PROPUESTA", "CONFIRMACION"],
+    "must_not_say": ["embargo", "demanda", "lista negra"]
+  }
+}

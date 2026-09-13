@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:05,555
+Si tu ingreso llega con la cosecha, planifica desde ahora:
+
+2
+00:00:05,555 --> 00:00:13,333
+separa una parte de cada venta para las cuotas de los meses sin ingreso.
+
+3
+00:00:13,333 --> 00:00:20,000
+Y si el clima afecta tu cultivo, avísanos antes de la fecha.

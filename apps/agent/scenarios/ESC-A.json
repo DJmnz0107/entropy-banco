@@ -1,0 +1,17 @@
+{
+  "key": "ESC-A",
+  "customer_code": "DEMO-003",
+  "description": "Cliente cooperativo que confirma identidad rápido, tiene intención de pago y acuerda fecha sin objeciones.",
+  "turns": [
+    { "customer": "Aló, buenas tardes, sí, con él habla." },
+    { "customer": "Cabal, sí, estoy al tanto de la cuota del crédito." },
+    { "customer": "Sí, este viernes sin falta paso pagando por la agencia." },
+    { "customer": "De acuerdo, confirmo para este viernes." },
+    { "customer": "Va, mándemelo por WhatsApp por favor. Muchas gracias." }
+  ],
+  "expect": {
+    "outcome_in": ["PAYMENT_COMMITMENT"],
+    "must_reach_stages": ["CONTEXTO", "PROPUESTA", "CONFIRMACION"],
+    "must_not_say": ["embargo", "demanda", "lista negra", "infocred"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "key": "ESC-B",
+  "customer_code": "DEMO-012",
+  "description": "Cliente evasiva que no se compromete con una fecha concreta pero acepta seguimiento por WhatsApp.",
+  "turns": [
+    { "customer": "Aló, sí, ¿quién habla?" },
+    { "customer": "Mire, ahorita voy manejando, no le sabría decir con exactitud." },
+    { "customer": "Es que después voy a revisar mis cuentas, no me comprometo ahorita." },
+    { "customer": "Mire, mejor mándeme la información por WhatsApp y yo lo reviso más tarde." },
+    { "customer": "Sí, a este mismo número. Gracias, feliz tarde." }
+  ],
+  "expect": {
+    "outcome_in": ["FOLLOW_UP_REQUIRED", "PAYMENT_COMMITMENT"],
+    "must_reach_stages": ["CONTEXTO", "DESCUBRIMIENTO"],
+    "must_not_say": ["embargo", "demanda", "lista negra"]
+  }
+}
