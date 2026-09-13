@@ -764,6 +764,27 @@ left join commitments cm on cm.id = cv.commitment_id
 where cv.status <> 'active' and cv.risk_before is not null
 group by 1, 2;
 
+
+-- ─── Modelos disponibles (12/09/2026: gemini-2.5-flash-lite ya no está disponible para cuentas nuevas) ──
+create or replace function apply_model_updates() returns void
+language plpgsql as $$
+begin
+  insert into ai_model_profiles (key, role, provider, model_id, display_name, modality, params, pricing, capabilities,
+                                 pricing_source_url, pricing_verified_at, status, notes)
+  values ('simulator.gemini-3.1-flash-lite', 'customer_simulator', 'google', 'gemini-3.1-flash-lite', 'Cliente simulado · 3.1 Flash-Lite', 'text',
+          '{"temperature":0.9,"max_output_tokens":120}', '{"text_in_per_1m":0.25,"text_out_per_1m":1.50,"free_tier":true}', '{}',
+          'https://ai.google.dev/gemini-api/docs/pricing', '2026-09-12', 'active',
+          'Temperatura alta a propósito: es el cliente simulado, nunca el agente.')
+  on conflict (key) do nothing;
+  update ai_model_profiles set status = 'retired',
+         notes = coalesce(notes, '') || ' · RETIRADO: no disponible para cuentas nuevas (verificado 12/09/2026).'
+   where model_id = 'gemini-2.5-flash-lite' and status <> 'retired';
+  update ai_model_profiles set status = 'active' where key in ('supervisor.gemini-3.1-flash-lite', 'composer.gemini-3.1-flash-lite');
+  update agent_policies set default_models = default_models
+         || '{"supervisor":"supervisor.gemini-3.1-flash-lite","composer":"composer.gemini-3.1-flash-lite","summarizer":"supervisor.gemini-3.1-flash-lite"}'
+   where is_active;
+end $$;
+
 -- ─── Seed del motor (videos + perfiles de voz) ────────────────────────────
 create or replace function seed_prevention_config() returns jsonb
 language plpgsql as $seed$
@@ -811,6 +832,8 @@ begin
 
   update agent_policies set default_models = default_models || '{"voice_mode":"elevenlabs","voice_realtime":"voice.elevenlabs"}'
    where is_active;
+  update agent_policies set payment_link_base_url = 'http://localhost:3001/pagar/' where is_active and payment_link_base_url like 'http://localhost:3000/%';
+  perform apply_model_updates();
 
   return jsonb_build_object('education_contents', (select count(*) from education_contents));
 end $seed$;
@@ -1029,3 +1052,5 @@ grant execute on all functions in schema public to authenticated, service_role;
 grant execute on function get_payment_link(text) to anon;
 grant execute on function simulate_payment(text, text) to anon;
 grant execute on function get_education_content(text, uuid) to anon;
+
+select apply_model_updates();

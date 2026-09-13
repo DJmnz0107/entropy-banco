@@ -17,9 +17,10 @@ Documentos:
 - `docs/PLAN.md` — plan, reparto por persona, voz/interrupciones, guion de demo, herramientas.
 - `docs/CONTRATO-API.md` — **contrato RPC** entre voz, WhatsApp y web. Leer antes de integrar.
 - `docs/WEB-CENTRO-PREVENCION.md` — paso a paso de la web (Centro de Prevención, en vivo, impacto, configuración).
-- `docs/AGENTE-VOZ-ELEVENLABS.md` — paso a paso del agente de voz con ElevenLabs.
-- 🆕 = objetos de la migración 1200 (Motor de Prevención) **aún no creada**: `next_best_intervention`, `run_prevention`,
-  `v_prevention_center`, `v_customer_financial_profile`, `intervention_steps`, `education_contents`, `v_impact`, `v_learning`.
+- `docs/AGENTE-VOZ-ELEVENLABS.md` — agente de voz implementado: arquitectura, variables, configuración de ElevenLabs y pruebas.
+- Migración 1200 (Motor de Prevención): `next_best_intervention`, `run_prevention`, `get_prevention_run`,
+  `start_simulated_conversation`, `send_education`, `v_prevention_center`, `v_customer_financial_profile`,
+  `intervention_steps`, `education_contents`, `v_impact`, `v_learning`.
 
 ## Decisiones vigentes
 
@@ -30,7 +31,9 @@ Documentos:
 | LLM | **Gemini**, configurable por fila en `ai_model_profiles` (no hardcodear modelos) |
 | Concepto | **Motor de Prevención / Next Best Intervention**: detectar → decidir la mejor intervención → contactar → adaptar → resolver → educar → seguir → medir → aprender. La voz es un brazo, no el producto |
 | Segmentación | Calificación preventiva **A–E** (= bandas de riesgo) + categoría regulatoria SSF A1–E (por días de atraso). Llamadas priorizadas a C–D; E → humano |
-| Voz | **ElevenLabs Agents + Custom LLM** (nuestro servidor responde `/v1/chat/completions` y ejecuta las tools contra Supabase). Plan B: LLM integrado + server tools. Gemini Live queda descartado |
+| Voz | **ElevenLabs Agents + Custom LLM** (nuestro servidor responde `/v1/chat/completions` y ejecuta las tools contra Supabase). Sin claves de ElevenLabs las llamadas se simulan con Gemini. Gemini Live queda descartado |
+| Política de la corrida | `agent_policies.channel_by_grade`: **C–E llamada, A–B correo (Resend)**; C–E sin respuesta → correo (`email_fallback`). Topes `max_calls_per_run` / `max_simulated_calls_per_run` |
+| Modelos Gemini | `gemini-3.1-flash-lite` (cerebro, supervisor, cliente simulado). `gemini-2.5-flash-lite` NO disponible para cuentas nuevas |
 | Supervisor / WhatsApp | Gemini Flash-Lite (endpoint compatible OpenAI) |
 | Demo de voz | Navegador (WebRTC), **no** telefonía |
 | Datos | 100% ficticios, seed determinista, fechas relativas a hoy (America/El_Salvador) |
@@ -72,6 +75,9 @@ npm install
 npm run db:test      # migraciones + seed + 38 aserciones del flujo de control en Postgres local (PGlite)
 npm run db:metrics   # KPIs, distribución de riesgo, personajes, impacto
 npm run db:push      # requiere SUPABASE_DB_URL en .env; corre db:test antes
+npm run agent:dev    # servidor del agente :3000 (GET /health muestra proveedores activos)
+npx tsx apps/agent/src/scripts/simulate-call.ts DEMO-001 ESC-C    # llamada simulada (Supabase + Gemini reales)
+npx tsx apps/agent/src/scripts/test-custom-llm.ts DEMO-003        # endpoint Custom LLM como lo llama ElevenLabs
 ```
 
 SQL útil:
