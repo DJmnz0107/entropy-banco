@@ -1,0 +1,11 @@
+{
+  "key": "ESC-OPCIONES-01",
+  "customer_code": "DEMO-004",
+  "description": "Cliente pide explícitamente opciones/alternativas en vez de aceptar la primera propuesta: el agente debe nombrar 2-3 opciones y dejar que elija, no cerrarlo a una sola salida.",
+  "turns": [
+    { "customer": "Sí, con ella habla." },
+    { "customer": "No, la verdad ahorita no puedo pagar todo completo." },
+    { "customer": "Deme opciones, por favor, qué otras alternativas tengo." },
+    { "customer": "Me gustaría la de pago parcial, ¿cuánto sería?" }
+  ]
+}

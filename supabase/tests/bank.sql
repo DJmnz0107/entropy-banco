@@ -9,9 +9,9 @@ begin
   select count(*) into n from playbook_stages where stage_key = 'COMPROMISO' and agent_instructions like '%Permítame confirmar lo acordado%';
   insert into _t(paso,ok,detalle) values ('etapas con frase de confirmación del banco', n = (select count(*) from playbooks), n::text);
   select agent_instructions into s from playbook_stages where stage_key = 'APERTURA' limit 1;
-  insert into _t(paso,ok,detalle) values ('apertura con Sofía y verificación', s like '%Sofía%' and s like '%¿Tengo el gusto de hablar con%', left(s, 90));
+  insert into _t(paso,ok,detalle) values ('apertura con Mateo y verificación', s like '%Mateo%' and s like '%¿Tengo el gusto de hablar con%', left(s, 90));
   select assistant_name into s from agent_policies where is_active;
-  insert into _t(paso,ok,detalle) values ('persona Sofía en la política', s = 'Sofía, asistente digital de Bancoagrícola', s);
+  insert into _t(paso,ok,detalle) values ('persona Mateo en la política', s = 'Mateo, asistente digital de Bancoagrícola', s);
   insert into _t(paso,ok,detalle) values ('frases de amenaza prohibidas', (select 'embargo' = any(prohibited_phrases) and 'consecuencias legales' = any(prohibited_phrases) from agent_policies where is_active), null);
   insert into _t(paso,ok,detalle) values ('apply_bank_script idempotente', (select count(*) from agent_policies, unnest(prohibited_phrases) p where is_active and p = 'embargo') = 1
     and (apply_bank_script()->>'stages_updated')::int > 0 and (select count(*) from agent_policies, unnest(prohibited_phrases) p where is_active and p = 'embargo') = 1, null);
